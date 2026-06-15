@@ -1,0 +1,13 @@
+namespace SpiceNet.Protocol;
+
+public enum SpiceMouseButtonMask
+{
+    SPICE_MOUSE_BUTTON_MASK_LEFT = (1 << 0),
+    SPICE_MOUSE_BUTTON_MASK_MIDDLE = (1 << 1),
+    SPICE_MOUSE_BUTTON_MASK_RIGHT = (1 << 2),
+    SPICE_MOUSE_BUTTON_MASK_UP = (1 << 3),
+    SPICE_MOUSE_BUTTON_MASK_DOWN = (1 << 4),
+    SPICE_MOUSE_BUTTON_MASK_SIDE = (1 << 5),
+    SPICE_MOUSE_BUTTON_MASK_EXTRA = (1 << 6),
+    SPICE_MOUSE_BUTTON_MASK_MASK = 0x7F,
+}

@@ -1,0 +1,10 @@
+namespace SpiceNet.Protocol;
+
+public enum SpiceAudioDataMode
+{
+    SPICE_AUDIO_DATA_MODE_INVALID,
+    SPICE_AUDIO_DATA_MODE_RAW,
+    SPICE_AUDIO_DATA_MODE_CELT_0_5_1,
+    SPICE_AUDIO_DATA_MODE_OPUS,
+    SPICE_AUDIO_DATA_MODE_ENUM_END,
+}

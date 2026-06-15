@@ -1,0 +1,9 @@
+namespace SpiceNet.Protocol;
+
+public enum SpiceKeyboardModifierFlags
+{
+    SPICE_KEYBOARD_MODIFIER_FLAGS_SCROLL_LOCK = (1 << 0),
+    SPICE_KEYBOARD_MODIFIER_FLAGS_NUM_LOCK = (1 << 1),
+    SPICE_KEYBOARD_MODIFIER_FLAGS_CAPS_LOCK = (1 << 2),
+    SPICE_KEYBOARD_MODIFIER_FLAGS_MASK = 0x7,
+}

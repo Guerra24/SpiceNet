@@ -1,0 +1,15 @@
+namespace SpiceNet.Protocol;
+
+public enum SpiceVscMessageType
+{
+    SPICE_VSC_MESSAGE_TYPE_Init = 1,
+    SPICE_VSC_MESSAGE_TYPE_Error,
+    SPICE_VSC_MESSAGE_TYPE_ReaderAdd,
+    SPICE_VSC_MESSAGE_TYPE_ReaderRemove,
+    SPICE_VSC_MESSAGE_TYPE_ATR,
+    SPICE_VSC_MESSAGE_TYPE_CardRemove,
+    SPICE_VSC_MESSAGE_TYPE_APDU,
+    SPICE_VSC_MESSAGE_TYPE_Flush,
+    SPICE_VSC_MESSAGE_TYPE_FlushComplete,
+    SPICE_VSC_MESSAGE_TYPE_ENUM_END,
+}

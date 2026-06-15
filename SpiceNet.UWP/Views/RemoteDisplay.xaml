@@ -1,0 +1,77 @@
+﻿<Page
+    x:Class="SpiceNet.UWP.Views.RemoteDisplay"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:local="using:SpiceNet.UWP"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
+    xmlns:converters="using:SpiceNet.UWP.Converters"
+    xmlns:ext="using:SpiceNet.UWP.Extensions"
+    xmlns:models="using:SpiceNet.UWP.Models"
+    muxc:BackdropMaterial.ApplyToRootOrPageBackground="True"
+    Loaded="Page_Loaded"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:FitModeConverter x:Key="FitModeConverter" />
+    </Page.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid x:Name="Titlebar" Background="Transparent" />
+        <muxc:MenuBar HorizontalAlignment="Left">
+            <muxc:MenuBarItem Title="File">
+            </muxc:MenuBarItem>
+            <muxc:MenuBarItem Title="View">
+                <MenuFlyoutItem Text="Resize window" Click="{x:Bind ResizeToGuest}" />
+                <ToggleMenuFlyoutItem IsChecked="{x:Bind Data.AutoResizeGuest, Mode=TwoWay}" Text="Auto resize guest" />
+                <ToggleMenuFlyoutItem IsChecked="{x:Bind Data.AutoResizeViewer, Mode=TwoWay}" Text="Auto resize viewer" />
+                <MenuFlyoutSeparator />
+                <muxc:RadioMenuFlyoutItem Text="1:1" IsChecked="{x:Bind Data.FitMode, Mode=OneWay, Converter={StaticResource FitModeConverter}, ConverterParameter=OneToOne}" Command="{x:Bind Data.ChangeFitModeCommand}" GroupName="FitMode">
+                    <muxc:RadioMenuFlyoutItem.CommandParameter>
+                        <models:FitMode>
+                            OneToOne
+                        </models:FitMode>
+                    </muxc:RadioMenuFlyoutItem.CommandParameter>
+                </muxc:RadioMenuFlyoutItem>
+                <muxc:RadioMenuFlyoutItem Text="Scale" IsChecked="{x:Bind Data.FitMode, Mode=OneWay, Converter={StaticResource FitModeConverter}, ConverterParameter=FitToSize}" Command="{x:Bind Data.ChangeFitModeCommand}" GroupName="FitMode">
+                    <muxc:RadioMenuFlyoutItem.CommandParameter>
+                        <models:FitMode>
+                            FitToSize
+                        </models:FitMode>
+                    </muxc:RadioMenuFlyoutItem.CommandParameter>
+                </muxc:RadioMenuFlyoutItem>
+            </muxc:MenuBarItem>
+            <muxc:MenuBarItem Title="VM">
+                <MenuFlyoutItem Text="Ctrl+Alt+Delete" />
+                <MenuFlyoutItem Text="Ctrl+Alt+Backspace" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Print" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Ctrl+F1" />
+                <MenuFlyoutItem Text="Ctrl+?" />
+            </muxc:MenuBarItem>
+        </muxc:MenuBar>
+        <ScrollViewer x:Name="ScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" HorizontalAnchorRatio="0.5" VerticalAnchorRatio="0.5" SizeChanged="ScrollViewer_SizeChanged">
+            <canvas:CanvasAnimatedControl x:Name="RootCanvas"
+                IsTabStop="True" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Draw="RootCanvas_Draw"
+                PointerMoved="RootCanvas_PointerMoved"
+                PointerPressed="RootCanvas_PointerPressed"
+                PointerReleased="RootCanvas_PointerReleased" 
+                PointerWheelChanged="RootCanvas_PointerWheelChanged"
+                KeyDown="RootCanvas_KeyDown"
+                KeyUp="RootCanvas_KeyUp"
+                SizeChanged="RootCanvas_SizeChanged" />
+        </ScrollViewer>
+        <Grid Grid.Row="2" x:Name="StatusBar" Height="24">
+            
+        </Grid>
+    </Grid>
+</Page>

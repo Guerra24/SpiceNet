@@ -1,0 +1,11 @@
+namespace SpiceNet.Protocol;
+
+public enum QuicImageType
+{
+    QUIC_IMAGE_TYPE_INVALID,
+    QUIC_IMAGE_TYPE_GRAY,
+    QUIC_IMAGE_TYPE_RGB16,
+    QUIC_IMAGE_TYPE_RGB24,
+    QUIC_IMAGE_TYPE_RGB32,
+    QUIC_IMAGE_TYPE_RGBA,
+}

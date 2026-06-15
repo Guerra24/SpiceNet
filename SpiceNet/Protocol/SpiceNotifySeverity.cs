@@ -1,0 +1,9 @@
+namespace SpiceNet.Protocol;
+
+public enum SpiceNotifySeverity
+{
+    SPICE_NOTIFY_SEVERITY_INFO,
+    SPICE_NOTIFY_SEVERITY_WARN,
+    SPICE_NOTIFY_SEVERITY_ERROR,
+    SPICE_NOTIFY_SEVERITY_ENUM_END,
+}

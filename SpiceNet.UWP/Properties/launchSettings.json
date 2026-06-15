@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Local Machine": {
+      "commandName": "MsixPackage",
+      "nativeDebugging": false
+    }
+  }
+}

@@ -1,0 +1,19 @@
+﻿<Page
+    x:Class="SpiceNet.UWP.Views.Main"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:local="using:SpiceNet.UWP.Views"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    muxc:BackdropMaterial.ApplyToRootOrPageBackground="True"
+    mc:Ignorable="d">
+
+    <Grid>
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" Width="300">
+            <TextBox PlaceholderText="Address" Text="{x:Bind Data.Address, Mode=TwoWay}" />
+            <muxc:NumberBox PlaceholderText="Port" Minimum="1" Maximum="65535" SpinButtonPlacementMode="Inline" Value="{x:Bind Data.Port, Mode=TwoWay}" />
+            <Button Content="Connect" Command="{x:Bind Data.OpenRemoteDisplayCommand}" HorizontalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</Page>

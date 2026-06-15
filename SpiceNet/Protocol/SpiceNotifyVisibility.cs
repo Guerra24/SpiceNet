@@ -1,0 +1,9 @@
+namespace SpiceNet.Protocol;
+
+public enum SpiceNotifyVisibility
+{
+    SPICE_NOTIFY_VISIBILITY_LOW,
+    SPICE_NOTIFY_VISIBILITY_MEDIUM,
+    SPICE_NOTIFY_VISIBILITY_HIGH,
+    SPICE_NOTIFY_VISIBILITY_ENUM_END,
+}
