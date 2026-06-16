@@ -104,7 +104,7 @@ public class CursorChannel : BaseChannel
                     break;
                 case SpiceCursorType.SPICE_CURSOR_TYPE_MONO:
                     {
-                        var pixels = header.width * header.height;
+                        /*var pixels = header.width * header.height;
 
                         var original = new Span<byte>(relPtr.ToPointer(), pixels);
                         var output = (byte*)NativeMemory.Alloc((nuint)(pixels * 4));
@@ -120,7 +120,7 @@ public class CursorChannel : BaseChannel
 
                         var span = new Span<byte>(output, pixels * 4);
                         outputImage = span.ToArray();
-                        NativeMemory.Free(output);
+                        NativeMemory.Free(output);*/
                     }
                     break;
                 case SpiceCursorType.SPICE_CURSOR_TYPE_COLOR4:

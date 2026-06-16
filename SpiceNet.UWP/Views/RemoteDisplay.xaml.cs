@@ -63,22 +63,15 @@ public sealed partial class RemoteDisplay : Page
 
     private async void ApplicationView_Consolidated(ApplicationView sender, ApplicationViewConsolidatedEventArgs args)
     {
-
-        // Fix crash when vm shuts off
-        // Keyboard modifiers are inverted in the vm, needs to sync that at start
-        // Keyboard modifiers hang pressed when switch from gaphical to console
-        // Console serial view is missing one line at the bottom
+        // Try to render off thread (read writer lock or something)
 
         Data.Channel?.Dispose();
-        await RootCanvas.RunOnGameLoopThreadAsync(() =>
-        {
-            foreach (var surface in surfaces)
-                surface.Value.Dispose();
-            foreach (var bitmap in bitmaps)
-                bitmap.Value.Dispose();
-            foreach (var bitmap in cursors)
-                bitmap.Value.Item1.Dispose();
-        });
+        foreach (var surface in surfaces)
+            surface.Value.Dispose();
+        foreach (var bitmap in bitmaps)
+            bitmap.Value.Dispose();
+        foreach (var bitmap in cursors)
+            bitmap.Value.Item1.Dispose();
         surfaces.Clear();
         bitmaps.Clear();
         cursors.Clear();
@@ -561,59 +554,51 @@ public sealed partial class RemoteDisplay : Page
     {
         if (Data!.Channel!.CurrentMouseMode != Spice.SPICE_MOUSE_MODE_SERVER)
             return;
-        cursorVisual.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
-        {
-            cursorVisual.Offset = new Vector3(e.x, e.y, 0);
-        });
+
+        cursorVisual.Offset = new Vector3(e.x, e.y, 0);
     }
 
     private void Cursor_Set(object? sender, CursorSet e)
     {
-        cursorVisual.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
-        {
-            cursorVisual.IsVisible = e.Visible;
+        cursorVisual.IsVisible = e.Visible;
 
-            if (!e.Visible)
+        if (!e.Visible)
+            return;
+
+        using var ds = CanvasComposition.CreateDrawingSession(cursorSurface);
+        CanvasBitmap bitmap;
+
+        if (cursors.TryGetValue(e.Header.unique, out var set))
+        {
+            if (e.Image.Length > 0)
+                set.Item1.SetPixelBytes(e.Image);
+
+            cursorVisual.AnchorPoint = set.Item2;
+
+            bitmap = set.Item1;
+        }
+        else
+        {
+            if (e.Image.Length == 0)
                 return;
 
-            using var ds = CanvasComposition.CreateDrawingSession(cursorSurface);
-            CanvasBitmap bitmap;
+            bitmap = CanvasBitmap.CreateFromBytes(ds, e.Image, e.Header.width, e.Header.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
 
-            if (cursors.TryGetValue(e.Header.unique, out var set))
-            {
-                if (e.Image.Length > 0)
-                    set.Item1.SetPixelBytes(e.Image);
+            var anchorPoint = new Vector2(e.Header.hot_spot_x / cursorVisual.Size.X, e.Header.hot_spot_y / cursorVisual.Size.Y);
 
-                cursorVisual.AnchorPoint = set.Item2;
+            cursorVisual.AnchorPoint = anchorPoint;
 
-                bitmap = set.Item1;
-            }
-            else
-            {
-                if (e.Image.Length == 0)
-                    return;
+            cursors.Add(e.Header.unique, (bitmap, anchorPoint));
+        }
 
-                bitmap = CanvasBitmap.CreateFromBytes(ds, e.Image, e.Header.width, e.Header.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
-
-                var anchorPoint = new Vector2(e.Header.hot_spot_x / cursorVisual.Size.X, e.Header.hot_spot_y / cursorVisual.Size.Y);
-
-                cursorVisual.AnchorPoint = anchorPoint;
-
-                cursors.Add(e.Header.unique, (bitmap, anchorPoint));
-            }
-
-            ds.Clear(Colors.Transparent);
-            ds.DrawImage(bitmap);
-        });
+        ds.Clear(Colors.Transparent);
+        ds.DrawImage(bitmap);
     }
 
     private void Cursor_InvalidateOne(object? sender, ulong e)
     {
         if (cursors.Remove(e, out var bitmap))
-            _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
-            {
-                bitmap.Item1.Dispose();
-            });
+            bitmap.Item1.Dispose();
     }
 
     private void Cursor_InvalidateAll(object? sender, EventArgs e)
@@ -621,19 +606,13 @@ public sealed partial class RemoteDisplay : Page
         var tmp = cursors.ToList();
         cursors.Clear();
         if (tmp.Count > 0)
-            _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
-            {
-                foreach (var bitmap in tmp)
-                    bitmap.Value.Item1.Dispose();
-            });
+            foreach (var bitmap in tmp)
+                bitmap.Value.Item1.Dispose();
     }
 
     private void Cursor_Hide(object? sender, EventArgs e)
     {
-        cursorVisual.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
-        {
-            cursorVisual.IsVisible = false;
-        });
+        cursorVisual.IsVisible = false;
     }
 
     private void RootCanvas_PointerEntered(object sender, PointerRoutedEventArgs e)
