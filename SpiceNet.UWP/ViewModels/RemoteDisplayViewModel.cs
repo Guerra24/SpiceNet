@@ -7,7 +7,9 @@ namespace SpiceNet.UWP.ViewModels;
 
 public partial class RemoteDisplayViewModel : ObservableObject
 {
-    public MainChannel Channel { get; private set; }
+    private DispatcherQueue dispatcherQueue;
+
+    public MainChannel? Channel { get; private set; }
 
     [ObservableProperty]
     private bool _autoResizeGuest = true;
@@ -18,12 +20,28 @@ public partial class RemoteDisplayViewModel : ObservableObject
     [ObservableProperty]
     private FitMode _fitMode = FitMode.OneToOne;
 
+    [ObservableProperty]
+    private string _errorMessage = string.Empty;
+
     public event EventHandler? FitModeChanged;
 
     public RemoteDisplayViewModel(string address, int port)
     {
-        var host = Dns.GetHostEntry(address);
-        Channel = new MainChannel(new IPEndPoint(host.AddressList[0], port));
+        dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        try
+        {
+            var host = Dns.GetHostEntry(address);
+            Channel = new MainChannel(new IPEndPoint(host.AddressList[0], port));
+            Channel.OnDisconnected += Channel_OnDisconnected;
+            Channel.OnError += Channel_OnError;
+        }
+        catch (Exception e)
+        {
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                ErrorMessage = e.Message;
+            });
+        }
     }
 
     [RelayCommand]
@@ -31,5 +49,21 @@ public partial class RemoteDisplayViewModel : ObservableObject
     {
         FitMode = (FitMode)fitMode;
         FitModeChanged?.Invoke(this, new EventArgs());
+    }
+
+    private void Channel_OnDisconnected(object? sender, EventArgs e)
+    {
+        dispatcherQueue.TryEnqueue(() =>
+        {
+            ErrorMessage = "Disconnected...";
+        });
+    }
+
+    private void Channel_OnError(object? sender, Exception e)
+    {
+        dispatcherQueue.TryEnqueue(() =>
+        {
+            ErrorMessage = e.Message;
+        });
     }
 }

@@ -1,10 +1,18 @@
 ﻿using SpiceNet.Protocol;
 using System.Net;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace SpiceNet;
 
 public class CursorChannel : BaseChannel
 {
+    public event EventHandler<CursorSet>? Set;
+    public event EventHandler<SpicePoint16>? Move;
+    public event EventHandler<ulong>? InvalidateOne;
+    public event EventHandler? InvalidateAll;
+    public event EventHandler? Hide;
+
     public CursorChannel(IPEndPoint endPoint, byte channelId, uint connectionId) : base(endPoint)
     {
         base.channelId = channelId;
@@ -23,29 +31,150 @@ public class CursorChannel : BaseChannel
         switch (hdr.type)
         {
             case Spice.SPICE_MSG_CURSOR_INIT:
-                // TODO
+                {
+                    var msg = Unsafe.Read<SpiceMsgCursorInit>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceMsgCursorInit);
+
+                    ReadCursor(ref relPtr, msg.visible);
+                }
                 break;
             case Spice.SPICE_MSG_CURSOR_SET:
-                // TODO
+                {
+                    var msg = Unsafe.Read<SpiceMsgCursorSet>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceMsgCursorSet);
+
+                    ReadCursor(ref relPtr, msg.visible);
+                }
                 break;
             case Spice.SPICE_MSG_CURSOR_MOVE:
-                // TODO
+                {
+                    var position = Unsafe.Read<SpicePoint16>(ptr);
+
+                    Move?.Invoke(this, position);
+                }
                 break;
             case Spice.SPICE_MSG_CURSOR_HIDE:
-                // TODO
+                Hide?.Invoke(this, new EventArgs());
                 break;
             case Spice.SPICE_MSG_CURSOR_TRAIL:
                 // TODO
                 break;
             case Spice.SPICE_MSG_CURSOR_RESET:
-                // TODO
+                Hide?.Invoke(this, new EventArgs());
+                InvalidateAll?.Invoke(this, new EventArgs());
                 break;
             case Spice.SPICE_MSG_CURSOR_INVAL_ONE:
-                // TODO
+                {
+                    var unique = Unsafe.Read<ulong>(relPtr.ToPointer());
+                    InvalidateOne?.Invoke(this, unique);
+                }
                 break;
             case Spice.SPICE_MSG_CURSOR_INVAL_ALL:
-                // TODO
+                {
+                    InvalidateAll?.Invoke(this, new EventArgs());
+                }
                 break;
         }
     }
+
+    private unsafe void ReadCursor(ref nint relPtr, byte visible)
+    {
+        var outputImage = Array.Empty<byte>();
+        var flags = Unsafe.Read<ushort>(relPtr.ToPointer());
+        relPtr += sizeof(ushort);
+
+        if ((flags & Spice.CURSOR_FLAGS_NONE) != 0)
+        {
+            // do nothing?
+            Hide?.Invoke(this, new EventArgs());
+        }
+        if ((flags & Spice.CURSOR_FLAGS_CACHE_ME) != 0)
+        {
+            var header = Unsafe.Read<SpiceCursorHeader>(relPtr.ToPointer());
+            relPtr += sizeof(SpiceCursorHeader);
+
+            switch ((SpiceCursorType)header.type)
+            {
+                case SpiceCursorType.SPICE_CURSOR_TYPE_ALPHA:
+                    {
+                        var span = new Span<byte>(relPtr.ToPointer(), header.width * header.height * 4);
+
+                        outputImage = span.ToArray();
+                    }
+                    break;
+                case SpiceCursorType.SPICE_CURSOR_TYPE_MONO:
+                    {
+                        var pixels = header.width * header.height;
+
+                        var original = new Span<byte>(relPtr.ToPointer(), pixels);
+                        var output = (byte*)NativeMemory.Alloc((nuint)(pixels * 4));
+
+                        for (int i = 0; i < pixels * 4; i += 4)
+                        {
+                            var alpha = original[i / 4];
+                            output[i] = alpha;
+                            output[i + 1] = alpha;
+                            output[i + 2] = alpha;
+                            output[i + 3] = alpha;
+                        }
+
+                        var span = new Span<byte>(output, pixels * 4);
+                        outputImage = span.ToArray();
+                        NativeMemory.Free(output);
+                    }
+                    break;
+                case SpiceCursorType.SPICE_CURSOR_TYPE_COLOR4:
+                    break;
+                case SpiceCursorType.SPICE_CURSOR_TYPE_COLOR8:
+                    break;
+                case SpiceCursorType.SPICE_CURSOR_TYPE_COLOR16:
+                    break;
+                case SpiceCursorType.SPICE_CURSOR_TYPE_COLOR24:
+                    break;
+                case SpiceCursorType.SPICE_CURSOR_TYPE_COLOR32:
+                    break;
+                case SpiceCursorType.SPICE_CURSOR_TYPE_ENUM_END:
+                    break;
+            }
+
+            Set?.Invoke(this, new CursorSet(header, visible == 1, outputImage));
+        }
+        if ((flags & Spice.CURSOR_FLAGS_FROM_CACHE) != 0)
+        {
+            var unique = Unsafe.Read<ulong>(relPtr.ToPointer());
+
+            Set?.Invoke(this, new CursorSet(new SpiceCursorHeader { unique = unique }, visible == 1, outputImage));
+        }
+    }
 }
+
+public sealed class CursorSet : EventArgs
+{
+    public SpiceCursorHeader Header { get; }
+    public bool Visible { get; }
+    public byte[] Image { get; }
+
+    public CursorSet(SpiceCursorHeader header, bool visible, byte[] image)
+    {
+        Header = header;
+        Visible = visible;
+        Image = image;
+    }
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMsgCursorInit
+{
+    public SpicePoint16 position;
+    public ushort trail_length;
+    public ushort trail_frequency;
+    public byte visible;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMsgCursorSet
+{
+    public SpicePoint16 position;
+    public byte visible;
+}
+

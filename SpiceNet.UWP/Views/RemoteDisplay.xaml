@@ -7,7 +7,8 @@
     xmlns:local="using:SpiceNet.UWP"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
-    xmlns:converters="using:SpiceNet.UWP.Converters"
+    xmlns:converters="using:CommunityToolkit.WinUI.Converters"
+    xmlns:converters2="using:SpiceNet.UWP.Converters"
     xmlns:ext="using:SpiceNet.UWP.Extensions"
     xmlns:models="using:SpiceNet.UWP.Models"
     muxc:BackdropMaterial.ApplyToRootOrPageBackground="True"
@@ -15,7 +16,8 @@
     mc:Ignorable="d">
 
     <Page.Resources>
-        <converters:FitModeConverter x:Key="FitModeConverter" />
+        <converters:StringVisibilityConverter x:Key="StringVisibilityConverter" />
+        <converters2:FitModeConverter x:Key="FitModeConverter" />
     </Page.Resources>
 
     <Grid>
@@ -26,8 +28,6 @@
         </Grid.RowDefinitions>
         <Grid x:Name="Titlebar" Background="Transparent" />
         <muxc:MenuBar HorizontalAlignment="Left">
-            <muxc:MenuBarItem Title="File">
-            </muxc:MenuBarItem>
             <muxc:MenuBarItem Title="View">
                 <MenuFlyoutItem Text="Resize window" Click="{x:Bind ResizeToGuest}" />
                 <ToggleMenuFlyoutItem IsChecked="{x:Bind Data.AutoResizeGuest, Mode=TwoWay}" Text="Auto resize guest" />
@@ -58,20 +58,35 @@
                 <MenuFlyoutItem Text="Ctrl+?" />
             </muxc:MenuBarItem>
         </muxc:MenuBar>
-        <ScrollViewer x:Name="ScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" HorizontalAnchorRatio="0.5" VerticalAnchorRatio="0.5" SizeChanged="ScrollViewer_SizeChanged">
+        <ScrollViewer x:Name="ScrollViewer"
+                      Grid.Row="1"
+                      Background="{ThemeResource NavigationViewContentBackground}"
+                      BackgroundSizing="InnerBorderEdge"
+                      BorderBrush="{ThemeResource NavigationViewContentGridBorderBrush}"
+                      BorderThickness="0,1"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalAnchorRatio="0.5"
+                      VerticalAnchorRatio="0.5"
+                      SizeChanged="ScrollViewer_SizeChanged">
             <canvas:CanvasAnimatedControl x:Name="RootCanvas"
-                IsTabStop="True" HorizontalAlignment="Center" VerticalAlignment="Center"
-                Draw="RootCanvas_Draw"
-                PointerMoved="RootCanvas_PointerMoved"
-                PointerPressed="RootCanvas_PointerPressed"
-                PointerReleased="RootCanvas_PointerReleased" 
-                PointerWheelChanged="RootCanvas_PointerWheelChanged"
-                KeyDown="RootCanvas_KeyDown"
-                KeyUp="RootCanvas_KeyUp"
-                SizeChanged="RootCanvas_SizeChanged" />
+                                          IsTabStop="True" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Draw="RootCanvas_Draw" CreateResources="RootCanvas_CreateResources"
+                                          PointerMoved="RootCanvas_PointerMoved"
+                                          PointerPressed="RootCanvas_PointerPressed"
+                                          PointerReleased="RootCanvas_PointerReleased"
+                                          PointerWheelChanged="RootCanvas_PointerWheelChanged"
+                                          PointerEntered="RootCanvas_PointerEntered"
+                                          PointerExited="RootCanvas_PointerExited"
+                                          KeyDown="RootCanvas_KeyDown"
+                                          KeyUp="RootCanvas_KeyUp"
+                                          SizeChanged="RootCanvas_SizeChanged" />
         </ScrollViewer>
-        <Grid Grid.Row="2" x:Name="StatusBar" Height="24">
-            
+        <Grid Grid.Row="1" Background="#7f000000" Visibility="{x:Bind Data.ErrorMessage, Mode=OneWay, Converter={StaticResource StringVisibilityConverter}}">
+            <TextBlock Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Text="{x:Bind Data.ErrorMessage, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+        </Grid>
+        <Grid Grid.Row="2" x:Name="StatusBar" Padding="8,4">
+            <TextBlock Text="" />
         </Grid>
     </Grid>
 </Page>

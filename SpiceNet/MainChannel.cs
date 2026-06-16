@@ -1,6 +1,7 @@
 ﻿using SpiceNet.Protocol;
 using System.Diagnostics;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace SpiceNet;
@@ -9,13 +10,17 @@ public class MainChannel : BaseChannel
 {
     private uint agentTokens;
 
-    public DisplayChannel Display { get; private set; }
-    public CursorChannel Cursor { get; private set; }
-    public InputsChannel Inputs { get; private set; }
+    public int CurrentMouseMode { get; private set; } = Spice.SPICE_MOUSE_MODE_SERVER;
+
+    public DisplayChannel? Display { get; private set; }
+    public CursorChannel? Cursor { get; private set; }
+    public InputsChannel? Inputs { get; private set; }
 
     public event EventHandler<DisplayChannel>? DisplayInit;
     public event EventHandler<CursorChannel>? CursorInit;
     public event EventHandler<InputsChannel>? InputsInit;
+
+    public event EventHandler<ushort>? MouseModeChanged;
 
     public MainChannel(IPEndPoint endPoint) : base(endPoint)
     {
@@ -49,21 +54,7 @@ public class MainChannel : BaseChannel
                 connectionId = msg.session_id;
                 agentTokens = msg.agent_tokens;
 
-                if (msg.current_mouse_mode != Spice.SPICE_MOUSE_MODE_CLIENT && (msg.supported_mouse_modes & Spice.SPICE_MOUSE_MODE_CLIENT) == 1)
-                {
-                    var mouseMode = new SpiceMiniDataHeader
-                    {
-                        type = Spice.SPICE_MSGC_MAIN_MOUSE_MODE_REQUEST,
-                        size = (uint)sizeof(SpiceMsgcMainMouseMode)
-                    };
-
-                    var param = new SpiceMsgcMainMouseMode
-                    {
-                        mode = 1 << 1
-                    };
-
-                    SendMiniDataHeader(mouseMode, param);
-                }
+                ChangeMouseMode((ushort)msg.current_mouse_mode, (ushort)msg.supported_mouse_modes);
 
                 var attach = new SpiceMiniDataHeader
                 {
@@ -75,7 +66,11 @@ public class MainChannel : BaseChannel
 
                 break;
             case Spice.SPICE_MSG_MAIN_MOUSE_MODE:
-                // TODO
+                {
+                    var mode = Unsafe.Read<SpiceMsgcMainMouseMode>(ptr);
+
+                    ChangeMouseMode(mode.current_mode, mode.supported_modes);
+                }
                 break;
             case Spice.SPICE_MSG_MAIN_MULTI_MEDIA_TIME:
                 // TODO
@@ -94,22 +89,22 @@ public class MainChannel : BaseChannel
                             if (channel.id == 0)
                             {
                                 Display = new(endpoint, channel.id, connectionId);
-                                Display.Init();
-                                channels.Add(Display);
                                 DisplayInit?.Invoke(this, Display);
+                                Display.Start();
+                                channels.Add(Display);
                             }
                             break;
                         case Spice.SPICE_CHANNEL_INPUTS:
                             Inputs = new(endpoint, channel.id, connectionId);
-                            Inputs.Init();
-                            channels.Add(Inputs);
                             InputsInit?.Invoke(this, Inputs);
+                            Inputs.Start();
+                            channels.Add(Inputs);
                             break;
                         case Spice.SPICE_CHANNEL_CURSOR:
                             Cursor = new(endpoint, channel.id, connectionId);
-                            Cursor.Init();
-                            channels.Add(Cursor);
                             CursorInit?.Invoke(this, Cursor);
+                            Cursor.Start();
+                            channels.Add(Cursor);
                             break;
                         case Spice.SPICE_CHANNEL_PLAYBACK:
                             // TODO Playback (sound) channel
@@ -159,6 +154,30 @@ public class MainChannel : BaseChannel
                 break;
         }
     }
+
+    private unsafe void ChangeMouseMode(ushort current, ushort supported)
+    {
+        CurrentMouseMode = current;
+
+        MouseModeChanged?.Invoke(this, current);
+
+        if (current != Spice.SPICE_MOUSE_MODE_CLIENT && (supported & Spice.SPICE_MOUSE_MODE_CLIENT) != 0)
+        {
+            var mouseMode = new SpiceMiniDataHeader
+            {
+                type = Spice.SPICE_MSGC_MAIN_MOUSE_MODE_REQUEST,
+                size = (uint)sizeof(SpiceMsgcMainMouseModeRequest)
+            };
+
+            var param = new SpiceMsgcMainMouseModeRequest
+            {
+                mode = Spice.SPICE_MOUSE_MODE_CLIENT
+            };
+
+            SendMiniDataHeader(mouseMode, param);
+        }
+    }
+
 }
 
 
@@ -183,7 +202,14 @@ public struct SpiceMsgChannelId
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct SpiceMsgcMainMouseMode
+public struct SpiceMsgcMainMouseModeRequest
 {
     public ushort mode;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMsgcMainMouseMode
+{
+    public ushort supported_modes;
+    public ushort current_mode;
 }

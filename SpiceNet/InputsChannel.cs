@@ -10,6 +10,9 @@ public class InputsChannel : BaseChannel
     private int waitingForAck;
     private ushort internalButtonState;
 
+    public event EventHandler<InputKeyModifiers>? Init;
+    public event EventHandler<InputKeyModifiers>? KeyModifiersChanged;
+
     public InputsChannel(IPEndPoint endPoint, byte channelId, uint connectionId) : base(endPoint)
     {
         base.channelId = channelId;
@@ -30,125 +33,154 @@ public class InputsChannel : BaseChannel
             case Spice.SPICE_MSG_INPUTS_INIT:
                 {
                     var keyModifiers = Unsafe.Read<ushort>(ptr);
-                    // TODO
+                    var scrollLock = (keyModifiers & Spice.SPICE_SCROLL_LOCK_MODIFIER) != 0;
+                    var numLock = (keyModifiers & Spice.SPICE_NUM_LOCK_MODIFIER) != 0;
+                    var capsLock = (keyModifiers & Spice.SPICE_CAPS_LOCK_MODIFIER) != 0;
+
+                    Init?.Invoke(this, new InputKeyModifiers(scrollLock, numLock, capsLock));
                 }
                 break;
             case Spice.SPICE_MSG_INPUTS_KEY_MODIFIERS:
                 {
                     var keyModifiers = Unsafe.Read<ushort>(ptr);
-                    // TODO
+                    var scrollLock = (keyModifiers & Spice.SPICE_SCROLL_LOCK_MODIFIER) != 0;
+                    var numLock = (keyModifiers & Spice.SPICE_NUM_LOCK_MODIFIER) != 0;
+                    var capsLock = (keyModifiers & Spice.SPICE_CAPS_LOCK_MODIFIER) != 0;
+
+                    KeyModifiersChanged?.Invoke(this, new InputKeyModifiers(scrollLock, numLock, capsLock));
                 }
                 break;
             case Spice.SPICE_MSG_INPUTS_MOUSE_MOTION_ACK:
-                // TODO
                 waitingForAck -= Spice.SPICE_INPUT_MOTION_ACK_BUNCH;
                 break;
         }
     }
 
-    public void MouseMove(uint x, uint y, byte displayId)
+    public unsafe void MouseMove(uint x, uint y, byte displayId)
     {
-        unsafe
+        var mouseMode = new SpiceMiniDataHeader
         {
-            var mouseMode = new SpiceMiniDataHeader
-            {
-                type = Spice.SPICE_MSGC_INPUTS_MOUSE_POSITION,
-                size = (uint)sizeof(SpiceMousePosition)
-            };
+            type = Spice.SPICE_MSGC_INPUTS_MOUSE_POSITION,
+            size = (uint)sizeof(SpiceMousePosition)
+        };
 
-            var param = new SpiceMousePosition
-            {
-                x = x,
-                y = y,
-                button_state = internalButtonState,
-                display_id = displayId
-            };
-
-            if (waitingForAck < (2 * Spice.SPICE_INPUT_MOTION_ACK_BUNCH))
-            {
-                SendMiniDataHeader(mouseMode, param);
-                waitingForAck++;
-            }
-        }
-    }
-
-    public void MouseDown(byte button, ushort buttonState)
-    {
-        unsafe
+        var param = new SpiceMousePosition
         {
-            var mouseMode = new SpiceMiniDataHeader
-            {
-                type = Spice.SPICE_MSGC_INPUTS_MOUSE_PRESS,
-                size = (uint)sizeof(SpiceMousePress)
-            };
+            x = x,
+            y = y,
+            button_state = internalButtonState,
+            display_id = displayId
+        };
 
-            var param = new SpiceMousePress
-            {
-                button = button,
-                button_state = internalButtonState = buttonState
-            };
-
+        if (waitingForAck < (2 * Spice.SPICE_INPUT_MOTION_ACK_BUNCH))
+        {
             SendMiniDataHeader(mouseMode, param);
+            waitingForAck++;
         }
     }
 
-    public void MouseUp(byte button, ushort buttonState)
+    public unsafe void MouseMove(int dx, int dy)
     {
-        unsafe
+        var mouseMode = new SpiceMiniDataHeader
         {
-            var mouseMode = new SpiceMiniDataHeader
-            {
-                type = Spice.SPICE_MSGC_INPUTS_MOUSE_RELEASE,
-                size = (uint)sizeof(SpiceMousePress)
-            };
+            type = Spice.SPICE_MSGC_INPUTS_MOUSE_MOTION,
+            size = (uint)sizeof(SpiceMouseMotion)
+        };
 
-            var param = new SpiceMousePress
-            {
-                button = button,
-                button_state = internalButtonState = buttonState
-            };
+        var param = new SpiceMouseMotion
+        {
+            dx = dx,
+            dy = dy,
+            button_state = internalButtonState
+        };
 
+        if (waitingForAck < (2 * Spice.SPICE_INPUT_MOTION_ACK_BUNCH))
+        {
             SendMiniDataHeader(mouseMode, param);
+            waitingForAck++;
         }
     }
 
-    public void KeyDown(uint key)
+    public unsafe void MouseDown(byte button, ushort buttonState)
     {
-        unsafe
+        var mouseMode = new SpiceMiniDataHeader
         {
-            var mouseMode = new SpiceMiniDataHeader
-            {
-                type = Spice.SPICE_MSGC_INPUTS_KEY_DOWN,
-                size = (uint)sizeof(SpiceKey)
-            };
+            type = Spice.SPICE_MSGC_INPUTS_MOUSE_PRESS,
+            size = (uint)sizeof(SpiceMousePress)
+        };
 
-            var param = new SpiceKey
-            {
-                code = key
-            };
+        var param = new SpiceMousePress
+        {
+            button = button,
+            button_state = internalButtonState = buttonState
+        };
 
-            SendMiniDataHeader(mouseMode, param);
-        }
+        SendMiniDataHeader(mouseMode, param);
     }
 
-    public void KeyUp(uint key)
+    public unsafe void MouseUp(byte button, ushort buttonState)
     {
-        unsafe
+        var mouseMode = new SpiceMiniDataHeader
         {
-            var mouseMode = new SpiceMiniDataHeader
-            {
-                type = Spice.SPICE_MSGC_INPUTS_KEY_UP,
-                size = (uint)sizeof(SpiceKey)
-            };
+            type = Spice.SPICE_MSGC_INPUTS_MOUSE_RELEASE,
+            size = (uint)sizeof(SpiceMousePress)
+        };
 
-            var param = new SpiceKey
-            {
-                code = key < 0x100 ? key | 0x80 : key | 0x8000,
-            };
+        var param = new SpiceMousePress
+        {
+            button = button,
+            button_state = internalButtonState = buttonState
+        };
 
-            SendMiniDataHeader(mouseMode, param);
-        }
+        SendMiniDataHeader(mouseMode, param);
     }
+
+    public unsafe void KeyDown(uint key)
+    {
+        var mouseMode = new SpiceMiniDataHeader
+        {
+            type = Spice.SPICE_MSGC_INPUTS_KEY_DOWN,
+            size = (uint)sizeof(SpiceKey)
+        };
+
+        var param = new SpiceKey
+        {
+            code = key
+        };
+
+        SendMiniDataHeader(mouseMode, param);
+    }
+
+    public unsafe void KeyUp(uint key)
+    {
+        var mouseMode = new SpiceMiniDataHeader
+        {
+            type = Spice.SPICE_MSGC_INPUTS_KEY_UP,
+            size = (uint)sizeof(SpiceKey)
+        };
+
+        var param = new SpiceKey
+        {
+            code = key < 0x100 ? key | 0x80 : key | 0x8000,
+        };
+
+        SendMiniDataHeader(mouseMode, param);
+    }
+}
+
+public sealed class InputKeyModifiers : EventArgs
+{
+    public bool ScrollLock { get; }
+    public bool NumLock { get; }
+    public bool CapsLock { get; }
+
+    public InputKeyModifiers(bool scrollLock, bool numLock, bool capsLock)
+    {
+        ScrollLock = scrollLock;
+        NumLock = numLock;
+        CapsLock = capsLock;
+    }
+
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -158,6 +190,14 @@ public struct SpiceMousePosition
     public uint y;
     public ushort button_state;
     public byte display_id;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMouseMotion
+{
+    public int dx;
+    public int dy;
+    public ushort button_state;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

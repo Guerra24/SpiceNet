@@ -35,8 +35,10 @@ public class DisplayChannel : BaseChannel
             (1 << Spice.SPICE_DISPLAY_CAP_CODEC_MJPEG);
     }
 
-    protected override void InitChannel()
+    protected override void Connected()
     {
+        base.Connected();
+
         var init = new SpiceMiniDataHeader
         {
             type = Spice.SPICE_MSGC_DISPLAY_INIT,
@@ -76,22 +78,7 @@ public class DisplayChannel : BaseChannel
                     var bas = Marshal.PtrToStructure<SpiceMsgDisplayBase>(relPtr);
                     relPtr += sizeof(SpiceMsgDisplayBase);
 
-                    List<SpiceRect> clipRects = new();
-
-                    if ((SpiceClipType)bas.clip_type == SpiceClipType.SPICE_CLIP_TYPE_RECTS)
-                    {
-                        var num_rects = Marshal.ReadInt32(relPtr);
-                        relPtr += sizeof(int);
-
-                        for (int i = 0; i < num_rects; i++)
-                        {
-                            var rect = Marshal.PtrToStructure<SpiceRect>(relPtr + i * sizeof(SpiceRect));
-                            clipRects.Add(rect);
-                        }
-
-                        clipRects.TrimExcess();
-                        relPtr += num_rects * sizeof(SpiceRect);
-                    }
+                    var clipRects = ReadClipRects(ref relPtr, bas);
 
                     var copy = Marshal.PtrToStructure<SpiceCopy>(relPtr);
 
@@ -102,7 +89,7 @@ public class DisplayChannel : BaseChannel
                         descriptorBase += sizeof(SpiceImageDescriptor);
                         bool flipY = false;
 
-                        Debug.WriteLine((SpiceImageType)imageDescriptor.type);
+                        //Debug.WriteLine((SpiceImageType)imageDescriptor.type);
 
                         switch ((SpiceImageType)imageDescriptor.type)
                         {
@@ -123,7 +110,7 @@ public class DisplayChannel : BaseChannel
                                     var stride = Unsafe.Read<uint>(descriptorBase.ToPointer());
                                     descriptorBase += sizeof(uint);
 
-                                    if ((flags & (1 << 1)) == 1)
+                                    if ((flags & (1 << 1)) != 0)
                                     {
                                         // palette id long
                                         descriptorBase += sizeof(ulong);
@@ -349,22 +336,7 @@ public class DisplayChannel : BaseChannel
                     var bas = Marshal.PtrToStructure<SpiceMsgDisplayBase>(relPtr);
                     relPtr += sizeof(SpiceMsgDisplayBase);
 
-                    List<SpiceRect> clipRects = new();
-
-                    if ((SpiceClipType)bas.clip_type == SpiceClipType.SPICE_CLIP_TYPE_RECTS)
-                    {
-                        var num_rects = Unsafe.Read<uint>(relPtr.ToPointer());
-                        relPtr += sizeof(int);
-
-                        for (int i = 0; i < num_rects; i++)
-                        {
-                            var rect = Marshal.PtrToStructure<SpiceRect>(relPtr + i * sizeof(SpiceRect));
-                            clipRects.Add(rect);
-                        }
-
-                        clipRects.TrimExcess();
-                        relPtr += (nint)(num_rects * sizeof(SpiceRect));
-                    }
+                    var clipRects = ReadClipRects(ref relPtr, bas);
 
                     var type = (SpiceBrushType)Unsafe.Read<byte>(relPtr.ToPointer());
                     relPtr += sizeof(byte);
@@ -417,22 +389,7 @@ public class DisplayChannel : BaseChannel
                     var bas = Marshal.PtrToStructure<SpiceMsgDisplayBase>(relPtr);
                     relPtr += sizeof(SpiceMsgDisplayBase);
 
-                    List<SpiceRect> clipRects = new();
-
-                    if ((SpiceClipType)bas.clip_type == SpiceClipType.SPICE_CLIP_TYPE_RECTS)
-                    {
-                        var num_rects = Unsafe.Read<uint>(relPtr.ToPointer());
-                        relPtr += sizeof(int);
-
-                        for (int i = 0; i < num_rects; i++)
-                        {
-                            var rect = Marshal.PtrToStructure<SpiceRect>(relPtr + i * sizeof(SpiceRect));
-                            clipRects.Add(rect);
-                        }
-
-                        clipRects.TrimExcess();
-                        relPtr += (nint)(num_rects * sizeof(SpiceRect));
-                    }
+                    var clipRects = ReadClipRects(ref relPtr, bas);
 
                     var srcPoint = Marshal.PtrToStructure<SpicePoint>(relPtr);
 
@@ -509,6 +466,27 @@ public class DisplayChannel : BaseChannel
                 // TODO
                 break;
         }
+    }
+
+    private static unsafe List<SpiceRect> ReadClipRects(ref nint relPtr, SpiceMsgDisplayBase @base)
+    {
+        List<SpiceRect> clipRects = new();
+
+        if ((SpiceClipType)@base.clip_type == SpiceClipType.SPICE_CLIP_TYPE_RECTS)
+        {
+            var num_rects = Unsafe.Read<uint>(relPtr.ToPointer());
+            relPtr += sizeof(int);
+
+            for (int i = 0; i < num_rects; i++)
+            {
+                var rect = Marshal.PtrToStructure<SpiceRect>(relPtr + i * sizeof(SpiceRect));
+                clipRects.Add(rect);
+            }
+
+            clipRects.TrimExcess();
+            relPtr += (nint)(num_rects * sizeof(SpiceRect));
+        }
+        return clipRects;
     }
 }
 

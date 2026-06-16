@@ -1,15 +1,21 @@
 ﻿using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
+using Microsoft.Graphics.Canvas.UI;
+using Microsoft.Graphics.Canvas.UI.Composition;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using SpiceNet.Protocol;
 using SpiceNet.UWP.Extensions;
 using SpiceNet.UWP.Models;
 using SpiceNet.UWP.ViewModels;
+using System.Numerics;
+using Windows.Devices.Input;
 using Windows.Graphics.DirectX;
+using Windows.UI.Composition;
+using Windows.UI.Core;
 using Windows.UI.ViewManagement;
+using Windows.UI.Xaml.Hosting;
 
 namespace SpiceNet.UWP.Views;
-
 
 public sealed partial class RemoteDisplay : Page
 {
@@ -21,7 +27,18 @@ public sealed partial class RemoteDisplay : Page
 
     private Dictionary<ulong, CanvasBitmap> bitmaps = new();
 
+    private Dictionary<ulong, (CanvasBitmap, Vector2)> cursors = new();
+
     private ApplicationView applicationView;
+    private CoreWindow coreWindow;
+
+    private MouseDevice mouseDevice;
+    private SpriteVisual cursorVisual;
+    private bool mouseLocked;
+    private ushort currentMode;
+
+    private CompositionDrawingSurface cursorSurface = null!;
+    private TaskCompletionSource canvasReady = new();
 
     public RemoteDisplay(string address, int port)
     {
@@ -31,10 +48,17 @@ public sealed partial class RemoteDisplay : Page
 
         applicationView = ApplicationView.GetForCurrentView();
         applicationView.Consolidated += ApplicationView_Consolidated;
+        coreWindow = CoreWindow.GetForCurrentThread();
+
+        mouseDevice = MouseDevice.GetForCurrentView();
+
+        var compositor = ElementCompositionPreview.GetElementVisual(RootCanvas).Compositor;
+
+        cursorVisual = compositor.CreateSpriteVisual();
+
+        ElementCompositionPreview.SetElementChildVisual(RootCanvas, cursorVisual);
 
         Window.Current.SetTitleBar(Titlebar);
-
-        Data.Channel.DisplayInit += DisplayInit;
     }
 
     private async void ApplicationView_Consolidated(ApplicationView sender, ApplicationViewConsolidatedEventArgs args)
@@ -45,24 +69,32 @@ public sealed partial class RemoteDisplay : Page
         // Keyboard modifiers hang pressed when switch from gaphical to console
         // Console serial view is missing one line at the bottom
 
-        Data.Channel.Dispose();
+        Data.Channel?.Dispose();
         await RootCanvas.RunOnGameLoopThreadAsync(() =>
         {
             foreach (var surface in surfaces)
                 surface.Value.Dispose();
             foreach (var bitmap in bitmaps)
                 bitmap.Value.Dispose();
+            foreach (var bitmap in cursors)
+                bitmap.Value.Item1.Dispose();
         });
         surfaces.Clear();
         bitmaps.Clear();
+        cursors.Clear();
         RootCanvas.RemoveFromVisualTree();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, false, false);
-        Window.Current.Close();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, true, false);
     }
 
-    private void Page_Loaded(object sender, RoutedEventArgs e)
+    private async void Page_Loaded(object sender, RoutedEventArgs e)
     {
-        Data.Channel.Init();
+        await canvasReady.Task;
+        Data.Channel?.DisplayInit += DisplayInit;
+        Data.Channel?.InputsInit += InputsInit;
+        Data.Channel?.CursorInit += CursorInit;
+        Data.Channel?.MouseModeChanged += MouseModeChanged;
+        Data.Channel?.OnDisconnected += OnDisconnected;
+        Data.Channel?.Start();
     }
 
     private void DisplayInit(object? sender, DisplayChannel channel)
@@ -74,6 +106,56 @@ public sealed partial class RemoteDisplay : Page
         channel.SurfaceDrawFill += Display_SurfaceDrawFill;
         channel.SurfaceInvalidateList += Display_SurfaceInvalidateList;
     }
+
+    private void InputsInit(object? sender, InputsChannel channel)
+    {
+        channel.Init += SyncKeyModifiers;
+        channel.KeyModifiersChanged += SyncKeyModifiers;
+    }
+
+    private void CursorInit(object? sender, CursorChannel channel)
+    {
+        channel.Set += Cursor_Set;
+        channel.Move += Cursor_Move;
+        channel.InvalidateOne += Cursor_InvalidateOne;
+        channel.InvalidateAll += Cursor_InvalidateAll;
+        channel.Hide += Cursor_Hide;
+    }
+
+    private void OnDisconnected(object? sender, EventArgs e)
+    {
+        dispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+        {
+            mouseDevice.MouseMoved -= MouseDevice_MouseMoved;
+            mouseLocked = false;
+            coreWindow.PointerCursor = new(CoreCursorType.Arrow, 0);
+        });
+    }
+
+    private void MouseModeChanged(object? sender, ushort e)
+    {
+        dispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+        {
+            switch (e)
+            {
+                case Spice.SPICE_MOUSE_MODE_CLIENT:
+                    if (currentMode == Spice.SPICE_MOUSE_MODE_CLIENT)
+                        return;
+                    mouseDevice.MouseMoved -= MouseDevice_MouseMoved;
+                    mouseLocked = false;
+                    break;
+                case Spice.SPICE_MOUSE_MODE_SERVER:
+                    if (currentMode == Spice.SPICE_MOUSE_MODE_SERVER)
+                        return;
+                    mouseDevice.MouseMoved += MouseDevice_MouseMoved;
+                    mouseLocked = true;
+                    break;
+            }
+            currentMode = e;
+        });
+    }
+
+    #region Display
 
     private void Display_SurfaceCreate(object? sender, SpiceSurface e)
     {
@@ -126,7 +208,7 @@ public sealed partial class RemoteDisplay : Page
                     if (e.Image.Length == 0)
                         return;
 
-                    bitmap = CanvasBitmap.CreateFromBytes(surface, e.Image, (int)e.ImageDescriptor.width, (int)e.ImageDescriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized, 96);
+                    bitmap = CanvasBitmap.CreateFromBytes(surface, e.Image, (int)e.ImageDescriptor.width, (int)e.ImageDescriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
 
                     if ((e.ImageDescriptor.flags & Spice.SPICE_IMAGE_FLAGS_CACHE_ME) == 1)
                         bitmaps.Add(e.ImageDescriptor.id, bitmap);
@@ -147,11 +229,9 @@ public sealed partial class RemoteDisplay : Page
                         }
 
                         using var group = CanvasGeometry.CreateGroup(surface, layers);
+                        using var layer = ds.CreateLayer(1.0f, group);
 
-                        using (var layer = ds.CreateLayer(1.0f, group))
-                        {
-                            ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
-                        }
+                        ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
                     }
                     else
                     {
@@ -160,8 +240,6 @@ public sealed partial class RemoteDisplay : Page
                 }
             }
         });
-        /*var bitmap = CanvasBitmap.CreateFromBytes(sender, surfaceArgs.Image, (int)surfaceArgs.ImageDescriptor.width, (int)surfaceArgs.ImageDescriptor.height, DirectXPixelFormat.R8G8B8A8UIntNormalized);
-        args.DrawingSession.DrawImage(bitmap);*/
     }
 
     private void Display_SurfaceCopyBits(object? sender, SurfaceCopyBitsArgs e)
@@ -170,26 +248,33 @@ public sealed partial class RemoteDisplay : Page
         {
             if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
             {
-                var dest = e.Display.box.ToRect();
+                var rect = e.Display.box.ToRect();
 
-                using var target = new CanvasRenderTarget(surface, (float)dest.Width, (float)dest.Height);
+                using var bitmap = new CanvasRenderTarget(surface, (float)rect.Width, (float)rect.Height);
 
-                /*using (var ds = target.CreateDrawingSession())
-                {
-                    ds.Clear(Colors.Transparent);
-
-                    ds.DrawImage(surface, new Rect(0, 0, dest.Width, dest.Height), new Rect(e.Point.x, e.Point.y, dest.Width, dest.Height));
-                }*/
-
-                target.CopyPixelsFromBitmap(surface, 0, 0, e.Point.x, e.Point.y, (int)dest.Width, (int)dest.Height);
+                bitmap.CopyPixelsFromBitmap(surface, 0, 0, e.Point.x, e.Point.y, (int)rect.Width, (int)rect.Height);
 
                 using (var ds = surface.CreateDrawingSession())
                 {
-                    ds.DrawImage(target, dest, target.Bounds);
-                    /*foreach (var clip in e.ClipRects)
+                    if (e.ClipRects.Count > 0)
                     {
-                        ds.DrawRectangle(clip.ToRect(), Colors.Red);
-                    }*/
+                        var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                        for (int i = 0; i < e.ClipRects.Count; i++)
+                        {
+                            var clipRect = e.ClipRects[i];
+                            layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                        }
+
+                        using var group = CanvasGeometry.CreateGroup(surface, layers);
+                        using var layer = ds.CreateLayer(1.0f, group);
+
+                        ds.DrawImage(bitmap, rect, bitmap.Bounds);
+                    }
+                    else
+                    {
+                        ds.DrawImage(bitmap, rect, bitmap.Bounds);
+                    }
                 }
             }
         });
@@ -248,22 +333,107 @@ public sealed partial class RemoteDisplay : Page
             args.DrawingSession.DrawImage(surface.Value);
     }
 
+    private void FitCanvas()
+    {
+        if (RootCanvas.ActualWidth == 0 || RootCanvas.ActualHeight == 0)
+            return;
+        float zoomFactor = 1;
+
+        switch (Data.FitMode)
+        {
+            case FitMode.OneToOne:
+                zoomFactor = 1;
+                break;
+            case FitMode.FitToSize:
+                zoomFactor = (float)Math.Min(ScrollViewer.ViewportWidth / RootCanvas.ActualWidth, ScrollViewer.ViewportHeight / RootCanvas.ActualHeight);
+                break;
+        }
+
+        ScrollViewer.ChangeView(null, null, zoomFactor, true);
+    }
+
+    private void ScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e) => FitCanvas();
+
+    private void RootCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (Data.AutoResizeViewer)
+            ResizeToGuest();
+        FitCanvas();
+    }
+
+    private void ResizeToGuest()
+    {
+        var height = RootCanvas.ActualHeight + ScrollViewer.BorderThickness.Top + ScrollViewer.BorderThickness.Bottom + Titlebar.ActualHeight + StatusBar.ActualHeight + 1 * XamlRoot.RasterizationScale;
+        applicationView.TryResizeView(new Size(RootCanvas.Width, height));
+    }
+
+    #endregion
+    #region Inputs
+
+    private async void SyncKeyModifiers(object? sender, InputKeyModifiers e)
+    {
+        var states = await dispatcherQueue.EnqueueAsync(() =>
+        {
+            var scrollLock = coreWindow.GetKeyState(VirtualKey.Scroll).HasFlag(CoreVirtualKeyStates.Locked);
+            var numLock = coreWindow.GetKeyState(VirtualKey.NumberKeyLock).HasFlag(CoreVirtualKeyStates.Locked);
+            var capsLock = coreWindow.GetKeyState(VirtualKey.CapitalLock).HasFlag(CoreVirtualKeyStates.Locked);
+
+            return (scrollLock, numLock, capsLock);
+        }, DispatcherQueuePriority.High);
+
+        if (states.scrollLock != e.ScrollLock)
+        {
+            Data.Channel!.Inputs!.KeyDown(0x46);
+            Data.Channel.Inputs.KeyUp(0x46);
+        }
+
+        if (states.numLock != e.NumLock)
+        {
+            Data.Channel!.Inputs!.KeyDown(0x45);
+            Data.Channel.Inputs.KeyUp(0x45);
+        }
+
+        if (states.capsLock != e.CapsLock)
+        {
+            Data.Channel!.Inputs!.KeyDown(0x3a);
+            Data.Channel.Inputs.KeyUp(0x3a);
+        }
+    }
+
     private void RootCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (Data.Channel.Inputs == null)
+        if (Data.Channel?.Inputs?.Ready != true || Data!.Channel!.CurrentMouseMode == Spice.SPICE_MOUSE_MODE_SERVER)
             return;
         var point = e.GetCurrentPoint(RootCanvas);
+
+        cursorVisual.Offset = new Vector3((float)point.Position.X, (float)point.Position.Y, 0);
 
         Data.Channel.Inputs.MouseMove((uint)point.Position.X, (uint)point.Position.Y, 0);
 
         e.Handled = true;
     }
+
+    private void MouseDevice_MouseMoved(MouseDevice sender, MouseEventArgs args)
+    {
+        if (Data.Channel?.Inputs?.Ready != true || Data!.Channel!.CurrentMouseMode == Spice.SPICE_MOUSE_MODE_CLIENT || !mouseLocked)
+            return;
+
+        var delta = args.MouseDelta;
+        Data.Channel.Inputs.MouseMove(delta.X, delta.Y);
+    }
+
     private void RootCanvas_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (Data.Channel.Inputs == null)
+        if (Data.Channel?.Inputs?.Ready != true)
             return;
 
         RootCanvas.Focus(FocusState.Programmatic);
+
+        if (!mouseLocked && Data.Channel.CurrentMouseMode == Spice.SPICE_MOUSE_MODE_SERVER)
+        {
+            mouseLocked = true;
+            coreWindow.PointerCursor = null;
+        }
 
         var point = e.GetCurrentPoint(RootCanvas);
         byte button = 1;
@@ -294,7 +464,7 @@ public sealed partial class RemoteDisplay : Page
 
     private void RootCanvas_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        if (Data.Channel.Inputs == null)
+        if (Data.Channel?.Inputs?.Ready != true)
             return;
 
         var point = e.GetCurrentPoint(RootCanvas);
@@ -324,7 +494,7 @@ public sealed partial class RemoteDisplay : Page
 
     private void RootCanvas_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
-        if (Data.Channel.Inputs == null)
+        if (Data.Channel?.Inputs?.Ready != true)
             return;
 
         var point = e.GetCurrentPoint(RootCanvas);
@@ -343,24 +513,37 @@ public sealed partial class RemoteDisplay : Page
 
     private void RootCanvas_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (Data.Channel.Inputs == null)
+        if (Data.Channel?.Inputs?.Ready != true)
             return;
 
-        Data.Channel.Inputs.KeyDown(GetScancode(e.Key, e.KeyStatus.ScanCode));
+        if (e.Key == VirtualKey.U && coreWindow.GetKeyState(VirtualKey.LeftMenu).HasFlag(CoreVirtualKeyStates.Down) && coreWindow.GetKeyState(VirtualKey.LeftControl).HasFlag(CoreVirtualKeyStates.Down))
+        {
+            mouseLocked = false;
+            coreWindow.PointerCursor = new(CoreCursorType.Arrow, 0);
+        }
+
+        Data.Channel.Inputs.KeyDown(GetScancode(e.Key, e.KeyStatus));
         e.Handled = true;
     }
 
     private void RootCanvas_KeyUp(object sender, KeyRoutedEventArgs e)
     {
-        if (Data.Channel.Inputs == null)
+        if (Data.Channel?.Inputs?.Ready != true)
             return;
 
-        Data.Channel.Inputs.KeyUp(GetScancode(e.Key, e.KeyStatus.ScanCode));
+        var key = e.KeyStatus.ScanCode;
+
+        Data.Channel.Inputs.KeyUp(GetScancode(e.Key, e.KeyStatus));
         e.Handled = true;
     }
 
-    private uint GetScancode(VirtualKey key, uint scancode)
+    private uint GetScancode(VirtualKey key, CorePhysicalKeyStatus status)
     {
+        var scancode = status.ScanCode;
+
+        if (status.IsExtendedKey)
+            scancode = 0xE0 | (scancode << 8);
+
         switch (key)
         {
             case VirtualKey.Tab:
@@ -371,38 +554,120 @@ public sealed partial class RemoteDisplay : Page
         return scancode;
     }
 
-    private void FitCanvas()
-    {
-        if (RootCanvas.ActualWidth == 0 || RootCanvas.ActualHeight == 0)
-            return;
-        float zoomFactor = 1;
+    #endregion
+    #region Cursor
 
-        switch (Data.FitMode)
+    private void Cursor_Move(object? sender, SpicePoint16 e)
+    {
+        if (Data!.Channel!.CurrentMouseMode != Spice.SPICE_MOUSE_MODE_SERVER)
+            return;
+        cursorVisual.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
         {
-            case FitMode.OneToOne:
-                zoomFactor = 1;
-                break;
-            case FitMode.FitToSize:
-                zoomFactor = (float)Math.Min(ScrollViewer.ViewportWidth / RootCanvas.ActualWidth, ScrollViewer.ViewportHeight / RootCanvas.ActualHeight);
-                break;
+            cursorVisual.Offset = new Vector3(e.x, e.y, 0);
+        });
+    }
+
+    private void Cursor_Set(object? sender, CursorSet e)
+    {
+        cursorVisual.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+        {
+            cursorVisual.IsVisible = e.Visible;
+
+            if (!e.Visible)
+                return;
+
+            using var ds = CanvasComposition.CreateDrawingSession(cursorSurface);
+            CanvasBitmap bitmap;
+
+            if (cursors.TryGetValue(e.Header.unique, out var set))
+            {
+                if (e.Image.Length > 0)
+                    set.Item1.SetPixelBytes(e.Image);
+
+                cursorVisual.AnchorPoint = set.Item2;
+
+                bitmap = set.Item1;
+            }
+            else
+            {
+                if (e.Image.Length == 0)
+                    return;
+
+                bitmap = CanvasBitmap.CreateFromBytes(ds, e.Image, e.Header.width, e.Header.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
+
+                var anchorPoint = new Vector2(e.Header.hot_spot_x / cursorVisual.Size.X, e.Header.hot_spot_y / cursorVisual.Size.Y);
+
+                cursorVisual.AnchorPoint = anchorPoint;
+
+                cursors.Add(e.Header.unique, (bitmap, anchorPoint));
+            }
+
+            ds.Clear(Colors.Transparent);
+            ds.DrawImage(bitmap);
+        });
+    }
+
+    private void Cursor_InvalidateOne(object? sender, ulong e)
+    {
+        if (cursors.Remove(e, out var bitmap))
+            _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
+            {
+                bitmap.Item1.Dispose();
+            });
+    }
+
+    private void Cursor_InvalidateAll(object? sender, EventArgs e)
+    {
+        var tmp = cursors.ToList();
+        cursors.Clear();
+        if (tmp.Count > 0)
+            _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
+            {
+                foreach (var bitmap in tmp)
+                    bitmap.Value.Item1.Dispose();
+            });
+    }
+
+    private void Cursor_Hide(object? sender, EventArgs e)
+    {
+        cursorVisual.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+        {
+            cursorVisual.IsVisible = false;
+        });
+    }
+
+    private void RootCanvas_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (!(mouseLocked || Data?.Channel?.CurrentMouseMode != Spice.SPICE_MOUSE_MODE_SERVER))
+            return;
+        coreWindow.PointerCursor = null;
+    }
+
+    private void RootCanvas_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        coreWindow.PointerCursor = new(CoreCursorType.Arrow, 0);
+    }
+
+    private void RootCanvas_CreateResources(CanvasAnimatedControl sender, CanvasCreateResourcesEventArgs args)
+    {
+        var compositor = ElementCompositionPreview.GetElementVisual(RootCanvas).Compositor;
+
+        var canvasComposition = CanvasComposition.CreateCompositionGraphicsDevice(compositor, RootCanvas.Device);
+
+        cursorSurface = canvasComposition.CreateDrawingSurface(new Size(128, 128), DirectXPixelFormat.R8G8B8A8UIntNormalized, DirectXAlphaMode.Premultiplied);
+
+        using (var ds = CanvasComposition.CreateDrawingSession(cursorSurface))
+        {
+            ds.Clear(Colors.Transparent);
         }
 
-        ScrollViewer.ChangeView(null, null, zoomFactor, true);
+        var brush = compositor.CreateSurfaceBrush(cursorSurface);
+        cursorVisual.Brush = brush;
+        cursorVisual.Size = new Vector2(128, 128);
+
+        canvasReady.SetResult();
     }
 
-    private void ScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e) => FitCanvas();
+    #endregion
 
-    private void RootCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (Data.AutoResizeViewer)
-            ResizeToGuest();
-        FitCanvas();
-    }
-
-    // ui events
-    private void ResizeToGuest()
-    {
-        var height = RootCanvas.ActualHeight + Titlebar.ActualHeight + StatusBar.ActualHeight + 1;
-        applicationView.TryResizeView(new Size(RootCanvas.ActualWidth, height));
-    }
 }

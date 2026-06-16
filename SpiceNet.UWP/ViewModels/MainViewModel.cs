@@ -27,12 +27,12 @@ public partial class MainViewModel : ObservableObject
         {
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
 
-            var CoreView = CoreApplication.GetCurrentView();
-            var AppView = ApplicationView.GetForCurrentView();
-            var coreTitleBar = CoreView.TitleBar;
+            var coreView = CoreApplication.GetCurrentView();
+            var appView = ApplicationView.GetForCurrentView();
+            var coreTitleBar = coreView.TitleBar;
             coreTitleBar.ExtendViewIntoTitleBar = true;
 
-            var titleBar = AppView.TitleBar;
+            var titleBar = appView.TitleBar;
             titleBar.ButtonBackgroundColor = Colors.Transparent;
             titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
 
@@ -43,6 +43,6 @@ public partial class MainViewModel : ObservableObject
         });
         await ApplicationViewSwitcher.TryShowAsStandaloneAsync(viewId);
 
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, false, false);
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, true, false);
     }
 }
