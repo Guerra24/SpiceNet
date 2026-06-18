@@ -3,8 +3,10 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace SpiceNet;
 
@@ -51,6 +53,11 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
     {
         thread = new(Loop);
         thread.Start();
+    }
+
+    public void Stop()
+    {
+        // TODO: SPICE_MSGC_DISCONNECTING
     }
 
     private unsafe void Loop()
@@ -232,6 +239,15 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
                     handled = true;
                     break;
                 case Spice.SPICE_MSG_NOTIFY:
+                    {
+                        var notify = Unsafe.Read<SpiceMsgNotify>(ptr);
+
+                        var message = Encoding.UTF8.GetString((byte*)((nint)ptr + sizeof(SpiceMsgNotify)), (int)notify.message_len);
+                        Debug.WriteLine($"{notify.time_stamp} {notify.severity} {notify.visibility} {notify.what} {message}");
+                    }
+                    handled = true;
+                    break;
+                case Spice.SPICE_MSG_DISCONNECTING:
                     handled = true;
                     break;
             }
@@ -356,4 +372,14 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
         stream?.Dispose();
         client?.Dispose();
     }
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public unsafe struct SpiceMsgNotify
+{
+    public ulong time_stamp;
+    public SpiceNotifySeverity severity;
+    public SpiceNotifyVisibility visibility;
+    public uint what;
+    public uint message_len;
 }

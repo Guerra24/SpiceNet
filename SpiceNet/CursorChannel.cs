@@ -80,20 +80,20 @@ public class CursorChannel : BaseChannel
     private unsafe void ReadCursor(ref nint relPtr, byte visible)
     {
         var outputImage = Array.Empty<byte>();
-        var flags = Unsafe.Read<ushort>(relPtr.ToPointer());
-        relPtr += sizeof(ushort);
+        var flags = Unsafe.Read<SpiceCursorFlags>(relPtr.ToPointer());
+        relPtr += sizeof(SpiceCursorFlags);
 
-        if ((flags & Spice.CURSOR_FLAGS_NONE) != 0)
+        if (flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_NONE))
         {
             // do nothing?
             Hide?.Invoke(this, new EventArgs());
         }
-        if ((flags & Spice.CURSOR_FLAGS_CACHE_ME) != 0)
+        if (flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_CACHE_ME))
         {
             var header = Unsafe.Read<SpiceCursorHeader>(relPtr.ToPointer());
             relPtr += sizeof(SpiceCursorHeader);
 
-            switch ((SpiceCursorType)header.type)
+            switch (header.type)
             {
                 case SpiceCursorType.SPICE_CURSOR_TYPE_ALPHA:
                     {
@@ -139,7 +139,7 @@ public class CursorChannel : BaseChannel
 
             Set?.Invoke(this, new CursorSet(header, visible == 1, outputImage));
         }
-        if ((flags & Spice.CURSOR_FLAGS_FROM_CACHE) != 0)
+        if (flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_FROM_CACHE))
         {
             var unique = Unsafe.Read<ulong>(relPtr.ToPointer());
 

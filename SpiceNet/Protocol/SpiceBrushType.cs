@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceBrushType
+public enum SpiceBrushType : byte
 {
     SPICE_BRUSH_TYPE_NONE,
     SPICE_BRUSH_TYPE_SOLID,

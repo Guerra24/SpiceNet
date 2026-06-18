@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceClipType
+public enum SpiceClipType : byte
 {
     SPICE_CLIP_TYPE_NONE,
     SPICE_CLIP_TYPE_RECTS,

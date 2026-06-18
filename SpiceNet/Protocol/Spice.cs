@@ -242,7 +242,4 @@ public static partial class Spice
     public const int SPICE_NUM_LOCK_MODIFIER = 1 << 1;
     public const int SPICE_CAPS_LOCK_MODIFIER = 1 << 2;
 
-    public const int CURSOR_FLAGS_NONE = 1 << 0;
-    public const int CURSOR_FLAGS_CACHE_ME = 1 << 1;
-    public const int CURSOR_FLAGS_FROM_CACHE = 1 << 2;
 }

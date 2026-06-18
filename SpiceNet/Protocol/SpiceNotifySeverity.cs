@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceNotifySeverity
+public enum SpiceNotifySeverity : uint
 {
     SPICE_NOTIFY_SEVERITY_INFO,
     SPICE_NOTIFY_SEVERITY_WARN,

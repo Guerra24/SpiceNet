@@ -91,7 +91,7 @@ public class DisplayChannel : BaseChannel
 
                         //Debug.WriteLine((SpiceImageType)imageDescriptor.type);
 
-                        switch ((SpiceImageType)imageDescriptor.type)
+                        switch (imageDescriptor.type)
                         {
                             case SpiceImageType.SPICE_IMAGE_TYPE_BITMAP:
                                 {
@@ -338,8 +338,8 @@ public class DisplayChannel : BaseChannel
 
                     var clipRects = ReadClipRects(ref relPtr, bas);
 
-                    var type = (SpiceBrushType)Unsafe.Read<byte>(relPtr.ToPointer());
-                    relPtr += sizeof(byte);
+                    var type = Unsafe.Read<SpiceBrushType>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceBrushType);
 
                     uint color = 0;
 
@@ -472,7 +472,7 @@ public class DisplayChannel : BaseChannel
     {
         List<SpiceRect> clipRects = new();
 
-        if ((SpiceClipType)@base.clip_type == SpiceClipType.SPICE_CLIP_TYPE_RECTS)
+        if (@base.clip_type == SpiceClipType.SPICE_CLIP_TYPE_RECTS)
         {
             var num_rects = Unsafe.Read<uint>(relPtr.ToPointer());
             relPtr += sizeof(int);
@@ -572,7 +572,7 @@ public struct SpiceMsgDisplayBase
 {
     public uint surface_id;
     public SpiceRect box;
-    public byte clip_type;
+    public SpiceClipType clip_type;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -588,8 +588,8 @@ public struct SpiceCopy
 public struct SpiceImageDescriptor
 {
     public ulong id;
-    public byte type;
-    public byte flags;
+    public SpiceImageType type;
+    public SpiceImageFlags flags;
     public uint width;
     public uint height;
 }

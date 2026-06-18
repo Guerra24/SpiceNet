@@ -7,6 +7,7 @@ using SpiceNet.Protocol;
 using SpiceNet.UWP.Extensions;
 using SpiceNet.UWP.Models;
 using SpiceNet.UWP.ViewModels;
+using System.Collections.Concurrent;
 using System.Numerics;
 using Windows.Devices.Input;
 using Windows.Graphics.DirectX;
@@ -23,7 +24,7 @@ public sealed partial class RemoteDisplay : Page
 
     private RemoteDisplayViewModel Data;
 
-    private Dictionary<uint, CanvasRenderTarget> surfaces = new();
+    private ConcurrentDictionary<uint, CanvasRenderTarget> surfaces = new();
 
     private Dictionary<ulong, CanvasBitmap> bitmaps = new();
 
@@ -34,11 +35,12 @@ public sealed partial class RemoteDisplay : Page
 
     private MouseDevice mouseDevice;
     private SpriteVisual cursorVisual;
+    private CompositionDrawingSurface cursorSurface = null!;
     private bool mouseLocked;
     private ushort currentMode;
 
-    private CompositionDrawingSurface cursorSurface = null!;
     private TaskCompletionSource canvasReady = new();
+    private CanvasDevice canvasDevice = null!;
 
     public RemoteDisplay(string address, int port)
     {
@@ -61,10 +63,41 @@ public sealed partial class RemoteDisplay : Page
         Window.Current.SetTitleBar(Titlebar);
     }
 
-    private async void ApplicationView_Consolidated(ApplicationView sender, ApplicationViewConsolidatedEventArgs args)
+    private void Dispatcher_AcceleratorKeyActivated(CoreDispatcher sender, AcceleratorKeyEventArgs args)
     {
-        // Try to render off thread (read writer lock or something)
+        if (args.VirtualKey == VirtualKey.Menu)
+        {
+            if (Data.Channel?.Inputs?.Ready != true)
+                return;
 
+            switch (args.EventType)
+            {
+                case CoreAcceleratorKeyEventType.KeyDown:
+                case CoreAcceleratorKeyEventType.SystemKeyDown:
+                    Data.Channel.Inputs.KeyDown(GetScancode(args.VirtualKey, args.KeyStatus));
+                    args.Handled = true;
+                    break;
+                case CoreAcceleratorKeyEventType.KeyUp:
+                case CoreAcceleratorKeyEventType.SystemKeyUp:
+                    Data.Channel.Inputs.KeyUp(GetScancode(args.VirtualKey, args.KeyStatus));
+                    args.Handled = true;
+                    break;
+            }
+        }
+    }
+
+    private void RootCanvas_GotFocus(object sender, RoutedEventArgs e)
+    {
+        coreWindow.Dispatcher.AcceleratorKeyActivated += Dispatcher_AcceleratorKeyActivated;
+    }
+
+    private void RootCanvas_LostFocus(object sender, RoutedEventArgs e)
+    {
+        coreWindow.Dispatcher.AcceleratorKeyActivated -= Dispatcher_AcceleratorKeyActivated;
+    }
+
+    private void ApplicationView_Consolidated(ApplicationView sender, ApplicationViewConsolidatedEventArgs args)
+    {
         Data.Channel?.Dispose();
         foreach (var surface in surfaces)
             surface.Value.Dispose();
@@ -161,161 +194,138 @@ public sealed partial class RemoteDisplay : Page
             }
         });
 
-        _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
-        {
-            var surface = new CanvasRenderTarget(RootCanvas, e.width, e.height, 96);
+        var surface = new CanvasRenderTarget(canvasDevice, e.width, e.height, 96);
 
-            using (var ds = surface.CreateDrawingSession())
-                ds.Clear(Colors.Black);
+        using (var ds = surface.CreateDrawingSession())
+            ds.Clear(Colors.Black);
 
-            surfaces.Add(e.surface_id, surface);
-        });
+        surfaces.TryAdd(e.surface_id, surface);
     }
 
     private void Display_SurfaceDestroy(object? sender, uint e)
     {
-        _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
-        {
-            if (surfaces.TryGetValue(e, out var surface))
-            {
-                surfaces.Remove(e);
-                surface.Dispose();
-            }
-        });
+        if (surfaces.TryRemove(e, out var surface))
+            surface.Dispose();
     }
 
     private void Display_SurfaceDrawCopy(object? sender, SurfaceDrawCopyArgs e)
     {
-        _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
+        if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
-            if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
+            if (bitmaps.TryGetValue(e.ImageDescriptor.id, out var bitmap))
             {
+                if (e.Image.Length > 0)
+                    bitmap.SetPixelBytes(e.Image);
+            }
+            else
+            {
+                if (e.Image.Length == 0)
+                    return;
 
-                if (bitmaps.TryGetValue(e.ImageDescriptor.id, out var bitmap))
+                bitmap = CanvasBitmap.CreateFromBytes(surface, e.Image, (int)e.ImageDescriptor.width, (int)e.ImageDescriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
+
+                if (e.ImageDescriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME))
+                    bitmaps.Add(e.ImageDescriptor.id, bitmap);
+            }
+
+            var rect = e.Display.box.ToRect();
+
+            using (var ds = surface.CreateDrawingSession())
+            {
+                if (e.ClipRects.Count > 0)
                 {
-                    if (e.Image.Length > 0)
-                        bitmap.SetPixelBytes(e.Image);
+                    var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                    for (int i = 0; i < e.ClipRects.Count; i++)
+                    {
+                        var clipRect = e.ClipRects[i];
+                        layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                    }
+
+                    using var group = CanvasGeometry.CreateGroup(surface, layers);
+                    using var layer = ds.CreateLayer(1.0f, group);
+
+                    ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
                 }
                 else
                 {
-                    if (e.Image.Length == 0)
-                        return;
-
-                    bitmap = CanvasBitmap.CreateFromBytes(surface, e.Image, (int)e.ImageDescriptor.width, (int)e.ImageDescriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
-
-                    if ((e.ImageDescriptor.flags & Spice.SPICE_IMAGE_FLAGS_CACHE_ME) == 1)
-                        bitmaps.Add(e.ImageDescriptor.id, bitmap);
-                }
-
-                var rect = e.Display.box.ToRect();
-
-                using (var ds = surface.CreateDrawingSession())
-                {
-                    if (e.ClipRects.Count > 0)
-                    {
-                        var layers = new CanvasGeometry[e.ClipRects.Count];
-
-                        for (int i = 0; i < e.ClipRects.Count; i++)
-                        {
-                            var clipRect = e.ClipRects[i];
-                            layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
-                        }
-
-                        using var group = CanvasGeometry.CreateGroup(surface, layers);
-                        using var layer = ds.CreateLayer(1.0f, group);
-
-                        ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
-                    }
-                    else
-                    {
-                        ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
-                    }
+                    ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
                 }
             }
-        });
+        }
     }
 
     private void Display_SurfaceCopyBits(object? sender, SurfaceCopyBitsArgs e)
     {
-        _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
+        if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
-            if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
+            var rect = e.Display.box.ToRect();
+
+            using var bitmap = new CanvasRenderTarget(surface, (float)rect.Width, (float)rect.Height);
+
+            bitmap.CopyPixelsFromBitmap(surface, 0, 0, e.Point.x, e.Point.y, (int)rect.Width, (int)rect.Height);
+
+            using (var ds = surface.CreateDrawingSession())
             {
-                var rect = e.Display.box.ToRect();
-
-                using var bitmap = new CanvasRenderTarget(surface, (float)rect.Width, (float)rect.Height);
-
-                bitmap.CopyPixelsFromBitmap(surface, 0, 0, e.Point.x, e.Point.y, (int)rect.Width, (int)rect.Height);
-
-                using (var ds = surface.CreateDrawingSession())
+                if (e.ClipRects.Count > 0)
                 {
-                    if (e.ClipRects.Count > 0)
+                    var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                    for (int i = 0; i < e.ClipRects.Count; i++)
                     {
-                        var layers = new CanvasGeometry[e.ClipRects.Count];
-
-                        for (int i = 0; i < e.ClipRects.Count; i++)
-                        {
-                            var clipRect = e.ClipRects[i];
-                            layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
-                        }
-
-                        using var group = CanvasGeometry.CreateGroup(surface, layers);
-                        using var layer = ds.CreateLayer(1.0f, group);
-
-                        ds.DrawImage(bitmap, rect, bitmap.Bounds);
+                        var clipRect = e.ClipRects[i];
+                        layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
                     }
-                    else
-                    {
-                        ds.DrawImage(bitmap, rect, bitmap.Bounds);
-                    }
+
+                    using var group = CanvasGeometry.CreateGroup(surface, layers);
+                    using var layer = ds.CreateLayer(1.0f, group);
+
+                    ds.DrawImage(bitmap, rect, bitmap.Bounds);
+                }
+                else
+                {
+                    ds.DrawImage(bitmap, rect, bitmap.Bounds);
                 }
             }
-        });
+        }
     }
 
     private void Display_SurfaceDrawFill(object? sender, SurfaceDrawFill e)
     {
-        _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
+        if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
-            if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
+            using (var ds = surface.CreateDrawingSession())
             {
-
-                using (var ds = surface.CreateDrawingSession())
+                var rawColor = e.Color & 0xffffff;
+                var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
+                if (e.ClipRects.Count > 0)
                 {
-                    var rawColor = e.Color & 0xffffff;
-                    var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
-                    if (e.ClipRects.Count > 0)
+                    var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                    for (int i = 0; i < e.ClipRects.Count; i++)
                     {
-                        var layers = new CanvasGeometry[e.ClipRects.Count];
-
-                        for (int i = 0; i < e.ClipRects.Count; i++)
-                        {
-                            var clipRect = e.ClipRects[i];
-                            layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
-                        }
-
-                        using var group = CanvasGeometry.CreateGroup(surface, layers);
-
-                        ds.FillGeometry(group, color);
-                    }
-                    else
-                    {
-                        ds.FillRectangle(e.Display.box.ToRect(), color);
+                        var clipRect = e.ClipRects[i];
+                        layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
                     }
 
+                    using var group = CanvasGeometry.CreateGroup(surface, layers);
+
+                    ds.FillGeometry(group, color);
                 }
+                else
+                {
+                    ds.FillRectangle(e.Display.box.ToRect(), color);
+                }
+
             }
-        });
+        }
     }
 
     private void Display_SurfaceInvalidateList(object? sender, List<ulong> e)
     {
         foreach (var id in e)
             if (bitmaps.Remove(id, out var bitmap))
-                _ = RootCanvas.RunOnGameLoopThreadAsync(() =>
-                {
-                    bitmap.Dispose();
-                });
+                bitmap.Dispose();
 
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, false, false);
     }
@@ -524,8 +534,6 @@ public sealed partial class RemoteDisplay : Page
         if (Data.Channel?.Inputs?.Ready != true)
             return;
 
-        var key = e.KeyStatus.ScanCode;
-
         Data.Channel.Inputs.KeyUp(GetScancode(e.Key, e.KeyStatus));
         e.Handled = true;
     }
@@ -629,6 +637,8 @@ public sealed partial class RemoteDisplay : Page
 
     private void RootCanvas_CreateResources(CanvasAnimatedControl sender, CanvasCreateResourcesEventArgs args)
     {
+        canvasDevice = RootCanvas.Device;
+
         var compositor = ElementCompositionPreview.GetElementVisual(RootCanvas).Compositor;
 
         var canvasComposition = CanvasComposition.CreateCompositionGraphicsDevice(compositor, RootCanvas.Device);

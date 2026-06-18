@@ -80,6 +80,8 @@
                                           PointerExited="RootCanvas_PointerExited"
                                           KeyDown="RootCanvas_KeyDown"
                                           KeyUp="RootCanvas_KeyUp"
+                                          GotFocus="RootCanvas_GotFocus"
+                                          LostFocus="RootCanvas_LostFocus"
                                           SizeChanged="RootCanvas_SizeChanged" />
         </ScrollViewer>
         <Grid Grid.Row="1" Background="#7f000000" Visibility="{x:Bind Data.ErrorMessage, Mode=OneWay, Converter={StaticResource StringVisibilityConverter}}">

@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceCursorType
+public enum SpiceCursorType : byte
 {
     SPICE_CURSOR_TYPE_ALPHA,
     SPICE_CURSOR_TYPE_MONO,

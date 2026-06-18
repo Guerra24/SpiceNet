@@ -1,3 +1,4 @@
+using SpiceNet.Protocol;
 using System.Runtime.InteropServices;
 
 namespace SpiceNet;
@@ -9,7 +10,7 @@ public partial struct SpiceCursorHeader
     public ulong unique;
 
     [NativeTypeName("uint16_t")]
-    public byte type;
+    public SpiceCursorType type;
 
     [NativeTypeName("uint16_t")]
     public ushort width;

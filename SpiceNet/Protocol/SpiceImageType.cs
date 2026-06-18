@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceImageType
+public enum SpiceImageType : byte
 {
     SPICE_IMAGE_TYPE_BITMAP,
     SPICE_IMAGE_TYPE_QUIC,

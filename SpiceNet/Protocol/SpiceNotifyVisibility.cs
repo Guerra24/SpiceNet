@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceNotifyVisibility
+public enum SpiceNotifyVisibility : uint
 {
     SPICE_NOTIFY_VISIBILITY_LOW,
     SPICE_NOTIFY_VISIBILITY_MEDIUM,
