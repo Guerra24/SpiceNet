@@ -15,10 +15,12 @@ public class MainChannel : BaseChannel
     public DisplayChannel? Display { get; private set; }
     public CursorChannel? Cursor { get; private set; }
     public InputsChannel? Inputs { get; private set; }
+    public PlaybackChannel? Playback { get; private set; }
 
     public event EventHandler<DisplayChannel>? DisplayInit;
     public event EventHandler<CursorChannel>? CursorInit;
     public event EventHandler<InputsChannel>? InputsInit;
+    public event EventHandler<PlaybackChannel>? PlaybackInit;
 
     public event EventHandler<ushort>? MouseModeChanged;
 
@@ -107,7 +109,10 @@ public class MainChannel : BaseChannel
                             channels.Add(Cursor);
                             break;
                         case Spice.SPICE_CHANNEL_PLAYBACK:
-                            // TODO Playback (sound) channel
+                            Playback = new(endpoint, channel.id, connectionId);
+                            PlaybackInit?.Invoke(this, Playback);
+                            Playback.Start();
+                            channels.Add(Playback);
                             break;
                         case Spice.SPICE_CHANNEL_PORT:
                             // TODO what?

@@ -9,8 +9,14 @@ using SpiceNet.UWP.Models;
 using SpiceNet.UWP.ViewModels;
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Devices.Input;
 using Windows.Graphics.DirectX;
+using Windows.Media;
+using Windows.Media.Audio;
+using Windows.Media.MediaProperties;
+using Windows.Media.Render;
 using Windows.UI.Composition;
 using Windows.UI.Core;
 using Windows.UI.ViewManagement;
@@ -41,6 +47,11 @@ public sealed partial class RemoteDisplay : Page
 
     private TaskCompletionSource canvasReady = new();
     private CanvasDevice canvasDevice = null!;
+
+    private AudioGraph graph = null!;
+    private AudioFrameInputNode? frameInputNode;
+    private AudioDeviceOutputNode deviceOutputNode = null!;
+    private SpiceAudioDataMode audioDataMode = SpiceAudioDataMode.SPICE_AUDIO_DATA_MODE_RAW;
 
     public RemoteDisplay(string address, int port)
     {
@@ -94,6 +105,7 @@ public sealed partial class RemoteDisplay : Page
     private void RootCanvas_LostFocus(object sender, RoutedEventArgs e)
     {
         coreWindow.Dispatcher.AcceleratorKeyActivated -= Dispatcher_AcceleratorKeyActivated;
+        // TODO: Reset held keys
     }
 
     private void ApplicationView_Consolidated(ApplicationView sender, ApplicationViewConsolidatedEventArgs args)
@@ -108,16 +120,33 @@ public sealed partial class RemoteDisplay : Page
         surfaces.Clear();
         bitmaps.Clear();
         cursors.Clear();
+        frameInputNode?.Stop();
+        frameInputNode?.Dispose();
+        graph.Stop();
+        graph.Dispose();
         RootCanvas.RemoveFromVisualTree();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, true, false);
     }
 
     private async void Page_Loaded(object sender, RoutedEventArgs e)
     {
+        var settings = new AudioGraphSettings(AudioRenderCategory.Media);
+        var graphResult = await AudioGraph.CreateAsync(settings);
+
+        graph = graphResult.Graph;
+
+        var deviceOutputNodeResult = await graph.CreateDeviceOutputNodeAsync();
+
+        deviceOutputNode = deviceOutputNodeResult.DeviceOutputNode;
+
+        graph.Start();
+
         await canvasReady.Task;
+
         Data.Channel?.DisplayInit += DisplayInit;
         Data.Channel?.InputsInit += InputsInit;
         Data.Channel?.CursorInit += CursorInit;
+        Data.Channel?.PlaybackInit += PlaybackInit;
         Data.Channel?.MouseModeChanged += MouseModeChanged;
         Data.Channel?.OnDisconnected += OnDisconnected;
         Data.Channel?.Start();
@@ -148,14 +177,12 @@ public sealed partial class RemoteDisplay : Page
         channel.Hide += Cursor_Hide;
     }
 
-    private void OnDisconnected(object? sender, EventArgs e)
+    private void PlaybackInit(object? sender, PlaybackChannel channel)
     {
-        dispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
-        {
-            mouseDevice.MouseMoved -= MouseDevice_MouseMoved;
-            mouseLocked = false;
-            coreWindow.PointerCursor = new(CoreCursorType.Arrow, 0);
-        });
+        channel.Mode += Playback_Mode;
+        channel.StartPlayback += Playback_Start;
+        channel.Data += Playback_Data;
+        channel.StopPlayback += Playback_Stop;
     }
 
     private void MouseModeChanged(object? sender, ushort e)
@@ -178,6 +205,16 @@ public sealed partial class RemoteDisplay : Page
                     break;
             }
             currentMode = e;
+        });
+    }
+
+    private void OnDisconnected(object? sender, EventArgs e)
+    {
+        dispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+        {
+            mouseDevice.MouseMoved -= MouseDevice_MouseMoved;
+            mouseLocked = false;
+            coreWindow.PointerCursor = new(CoreCursorType.Arrow, 0);
         });
     }
 
@@ -371,6 +408,7 @@ public sealed partial class RemoteDisplay : Page
     }
 
     #endregion
+
     #region Inputs
 
     private async void SyncKeyModifiers(object? sender, InputKeyModifiers e)
@@ -556,6 +594,7 @@ public sealed partial class RemoteDisplay : Page
     }
 
     #endregion
+
     #region Cursor
 
     private void Cursor_Move(object? sender, SpicePoint16 e)
@@ -655,6 +694,52 @@ public sealed partial class RemoteDisplay : Page
         cursorVisual.Size = new Vector2(128, 128);
 
         canvasReady.SetResult();
+    }
+
+    #endregion
+
+    #region Playback
+
+    private void Playback_Mode(object? sender, SpiceAudioDataMode e) => audioDataMode = e;
+
+    private void Playback_Start(object? sender, SpiceMsgRecordStart e)
+    {
+        var properties = AudioEncodingProperties.CreatePcm(e.frequency, e.channels, 16);
+        //if (audioDataMode == SpiceAudioDataMode.SPICE_AUDIO_DATA_MODE_OPUS)
+        //properties.Subtype = "OPUS";
+
+        frameInputNode = graph.CreateFrameInputNode(properties);
+        frameInputNode.AddOutgoingConnection(deviceOutputNode);
+    }
+
+    private void Playback_Data(object? sender, PlaybackData e)
+    {
+        var frame = new AudioFrame((uint)e.Data.Length * sizeof(short));
+
+        using (var buffer = frame.LockBuffer(AudioBufferAccessMode.Write))
+        using (var reference = buffer.CreateReference())
+        {
+            WindowsRuntimeMarshal.TryGetDataUnsafe(reference, out var dataInBytes, out var capacityInBytes);
+            Marshal.Copy(e.Data, 0, dataInBytes, e.Data.Length);
+        }
+
+        frame.RelativeTime = TimeSpan.FromMilliseconds(e.Time);
+
+        try
+        {
+            frameInputNode?.AddFrame(frame);
+        }
+        catch
+        {
+            frameInputNode?.DiscardQueuedFrames();
+        }
+    }
+
+    private void Playback_Stop(object? sender, EventArgs e)
+    {
+        frameInputNode?.Stop();
+        frameInputNode?.Dispose();
+        frameInputNode = null;
     }
 
     #endregion

@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceAudioDataMode
+public enum SpiceAudioDataMode : ushort
 {
     SPICE_AUDIO_DATA_MODE_INVALID,
     SPICE_AUDIO_DATA_MODE_RAW,
