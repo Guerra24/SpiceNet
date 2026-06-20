@@ -1,14 +1,20 @@
-﻿using SpiceNet.Protocol;
+﻿using Microsoft.VisualBasic;
+using SpiceNet.Protocol;
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
+using static SpiceNet.VDAgentMonitorsConfig;
 
 namespace SpiceNet;
 
 public class MainChannel : BaseChannel
 {
     private uint agentTokens;
+    private bool agentConneted;
+
+    private uint agentCaps;
 
     public int CurrentMouseMode { get; private set; } = Spice.SPICE_MOUSE_MODE_SERVER;
 
@@ -24,6 +30,12 @@ public class MainChannel : BaseChannel
 
     public event EventHandler<ushort>? MouseModeChanged;
 
+    public event EventHandler<string>? ReceiveClipboard;
+    public event EventHandler<RequestClipboardArgs>? SendClipboard;
+
+    public event EventHandler<string>? Name;
+    public event EventHandler<Guid>? Guid;
+
     public MainChannel(IPEndPoint endPoint) : base(endPoint)
     {
         connectionId = 0;
@@ -33,10 +45,16 @@ public class MainChannel : BaseChannel
 
     protected override int GetChannelCaps()
     {
-        return 1 << Spice.SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS;
+        return (1 << Spice.SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS) | (1 << Spice.SPICE_MAIN_CAP_NAME_AND_UUID);
     }
 
-    protected override unsafe void ProcessMessage(SpiceMiniDataHeader hdr, Span<byte> data, void* ptr)
+    protected override void Disconnected()
+    {
+        base.Disconnected();
+        agentConneted = false;
+    }
+
+    protected override unsafe void ProcessMessage(SpiceMiniDataHeader hdr, Span<byte> _, void* ptr)
     {
         nint relPtr = (nint)ptr;
         switch (hdr.type)
@@ -57,6 +75,9 @@ public class MainChannel : BaseChannel
                 agentTokens = msg.agent_tokens;
 
                 ChangeMouseMode((ushort)msg.current_mouse_mode, (ushort)msg.supported_mouse_modes);
+
+                if (msg.agent_connected == 1)
+                    ConnectAgent();
 
                 var attach = new SpiceMiniDataHeader
                 {
@@ -122,19 +143,126 @@ public class MainChannel : BaseChannel
 
                 break;
             case Spice.SPICE_MSG_MAIN_AGENT_CONNECTED:
-                // TODO
+                ConnectAgent();
                 break;
             case Spice.SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS:
-                // TODO
+                {
+                    var connectedTokens = Unsafe.Read<SpiceMsgMainAgentTokens>(ptr);
+                    agentTokens = connectedTokens.num_tokens;
+                    ConnectAgent();
+                }
                 break;
             case Spice.SPICE_MSG_MAIN_AGENT_TOKEN:
-                // TODO
+                {
+                    var connectedTokens = Unsafe.Read<SpiceMsgMainAgentTokens>(ptr);
+                    agentTokens += connectedTokens.num_tokens;
+                }
                 break;
             case Spice.SPICE_MSG_MAIN_AGENT_DISCONNECTED:
-                // TODO
+                agentConneted = false;
                 break;
             case Spice.SPICE_MSG_MAIN_AGENT_DATA:
-                // TODO
+                {
+                    var agentData = Unsafe.Read<SpiceMsgcMainAgentData>(ptr);
+                    var data = Unsafe.Add<SpiceMsgcMainAgentData>(ptr, 1);
+
+                    var hasClipboardSelection = ((agentCaps >> VDAgent.VD_AGENT_CAP_CLIPBOARD_SELECTION) & 1) != 0;
+                    switch (agentData.type)
+                    {
+                        case VDAgent.VD_AGENT_ANNOUNCE_CAPABILITIES:
+                            {
+                                var caps = Unsafe.Read<VDAgentAnnounceCapabilities>(data);
+                                agentCaps = caps.caps;
+                                if (caps.request != 0)
+                                    AnnounceAgentCaps(0);
+                            }
+                            break;
+                        case VDAgent.VD_AGENT_CLIPBOARD_GRAB:
+                            {
+                                Span<uint> req = stackalloc uint[hasClipboardSelection ? 2 : 1];
+
+                                if (hasClipboardSelection)
+                                    req[0] = 0;
+                                req[^1] = VDAgent.VD_AGENT_CLIPBOARD_UTF8_TEXT;
+
+                                var reply = new SpiceMsgcMainAgentData
+                                {
+                                    protocol = VDAgent.VD_AGENT_PROTOCOL,
+                                    type = VDAgent.VD_AGENT_CLIPBOARD_REQUEST,
+                                    opaque = 0,
+                                    size = (uint)(sizeof(uint) * req.Length)
+                                };
+
+                                var header = new SpiceMiniDataHeader
+                                {
+                                    type = Spice.SPICE_MSGC_MAIN_AGENT_DATA,
+                                };
+
+                                SendAgentData(header, reply, req);
+                                agentTokens--;
+                            }
+                            break;
+                        case VDAgent.VD_AGENT_CLIPBOARD:
+                            {
+                                if (hasClipboardSelection)
+                                    data = Unsafe.Add<uint>(data, 1);
+
+                                var type = Unsafe.Read<uint>(data);
+                                data = Unsafe.Add<uint>(data, 1);
+
+                                if (type == VDAgent.VD_AGENT_CLIPBOARD_UTF8_TEXT)
+                                {
+                                    var length = (int)(agentData.size - sizeof(uint) * (hasClipboardSelection ? 2 : 1));
+                                    if (length > 0)
+                                    {
+                                        var clipboard = Encoding.UTF8.GetString((byte*)data, length);
+
+                                        ReceiveClipboard?.Invoke(this, clipboard);
+                                    }
+                                }
+                            }
+                            break;
+                        case VDAgent.VD_AGENT_CLIPBOARD_REQUEST:
+                            {
+                                var args = new RequestClipboardArgs();
+                                SendClipboard?.Invoke(this, args);
+
+                                var clipboard = args.Clipboard ?? string.Empty;
+
+                                var offset = hasClipboardSelection ? 2 : 1;
+                                byte[] bytes = [..Encoding.UTF8.GetBytes(clipboard), 0];
+
+                                Span<byte> req = stackalloc byte[offset * sizeof(uint) + bytes.Length];
+
+                                bytes.CopyTo(req[(offset * sizeof(uint))..]);
+
+                                var casted = MemoryMarshal.Cast<byte, uint>(req);
+
+                                if (hasClipboardSelection)
+                                    casted[0] = 0;
+                                casted[offset - 1] = VDAgent.VD_AGENT_CLIPBOARD_UTF8_TEXT;
+
+                                var reply = new SpiceMsgcMainAgentData
+                                {
+                                    protocol = VDAgent.VD_AGENT_PROTOCOL,
+                                    type = VDAgent.VD_AGENT_CLIPBOARD,
+                                    opaque = 0,
+                                    size = (uint)req.Length
+                                };
+
+                                var header = new SpiceMiniDataHeader
+                                {
+                                    type = Spice.SPICE_MSGC_MAIN_AGENT_DATA,
+                                };
+
+                                SendAgentData(header, reply, req);
+                                agentTokens--;
+                            }
+                            break;
+                        case VDAgent.VD_AGENT_CLIPBOARD_RELEASE:
+                            break;
+                    }
+                }
                 break;
             case Spice.SPICE_MSG_MAIN_MIGRATE_SWITCH_HOST:
                 // TODO
@@ -143,10 +271,21 @@ public class MainChannel : BaseChannel
                 // TODO
                 break;
             case Spice.SPICE_MSG_MAIN_NAME:
-                // TODO
+                {
+                    var length = Unsafe.Read<uint>(ptr);
+                    var name = Encoding.UTF8.GetString((byte*)Unsafe.Add<uint>(ptr, 1), (int)length).Trim();
+
+                    Name?.Invoke(this, name);
+                }
                 break;
             case Spice.SPICE_MSG_MAIN_UUID:
-                // TODO
+                {
+                    var uuid = Unsafe.Read<SpiceMsgMainUuid>(ptr);
+
+                    var guid = new Guid(new Span<byte>(uuid.uuid, 16));
+
+                    Guid?.Invoke(this, guid);
+                }
                 break;
             case Spice.SPICE_MSG_MAIN_MIGRATE_BEGIN_SEAMLESS:
                 // TODO
@@ -183,6 +322,129 @@ public class MainChannel : BaseChannel
         }
     }
 
+    private unsafe void ConnectAgent()
+    {
+        var agentHeader = new SpiceMiniDataHeader
+        {
+            type = Spice.SPICE_MSGC_MAIN_AGENT_START,
+            size = (uint)sizeof(SpiceMsgcMainAgentStart)
+        };
+
+        var agentStart = new SpiceMsgcMainAgentStart
+        {
+            num_tokens = uint.MaxValue
+        };
+
+        SendMiniDataHeader(agentHeader, agentStart);
+
+        AnnounceAgentCaps(1);
+
+        agentConneted = true;
+    }
+
+    private unsafe void AnnounceAgentCaps(uint request)
+    {
+        var caps = new VDAgentAnnounceCapabilities
+        {
+            request = request,
+            caps = (1 << VDAgent.VD_AGENT_CAP_MOUSE_STATE) |
+                (1 << VDAgent.VD_AGENT_CAP_MONITORS_CONFIG) |
+                (1 << VDAgent.VD_AGENT_CAP_REPLY) |
+                (1 << VDAgent.VD_AGENT_CAP_CLIPBOARD_SELECTION) |
+                (1 << VDAgent.VD_AGENT_CAP_CLIPBOARD_BY_DEMAND)
+        };
+
+        var agentData = new SpiceMsgcMainAgentData
+        {
+            protocol = VDAgent.VD_AGENT_PROTOCOL,
+            type = VDAgent.VD_AGENT_ANNOUNCE_CAPABILITIES,
+            opaque = 0,
+            size = (uint)sizeof(VDAgentAnnounceCapabilities)
+        };
+
+        var header = new SpiceMiniDataHeader
+        {
+            type = Spice.SPICE_MSGC_MAIN_AGENT_DATA,
+        };
+
+        SendAgentData(header, agentData, caps);
+        agentTokens--;
+    }
+
+    public unsafe void ResizeMonitor(uint width, uint height)
+    {
+        if (!agentConneted)
+            return;
+
+        var config = new VDAgentMonitorsConfig
+        {
+            num_of_monitors = 1,
+            flags = 0
+        };
+
+        var monitors = stackalloc _monitors_e__FixedBuffer[(int)config.num_of_monitors];
+        var span = monitors->AsSpan(1);
+        span[0] = new VDAgentMonConfig
+        {
+            width = width,
+            height = height,
+            depth = 32,
+            x = 0,
+            y = 0
+        };
+        config.monitors = *monitors;
+
+        var agentData = new SpiceMsgcMainAgentData
+        {
+            protocol = VDAgent.VD_AGENT_PROTOCOL,
+            type = VDAgent.VD_AGENT_MONITORS_CONFIG,
+            opaque = 0,
+            size = (uint)(sizeof(VDAgentMonitorsConfig) - sizeof(VDAgentMonConfig) + sizeof(VDAgentMonConfig) * config.num_of_monitors)
+        };
+
+        var header = new SpiceMiniDataHeader
+        {
+            type = Spice.SPICE_MSGC_MAIN_AGENT_DATA,
+        };
+
+        SendAgentData(header, agentData, config);
+        agentTokens--;
+    }
+
+    public void NotifyClipboard()
+    {
+        if (!agentConneted)
+            return;
+
+        var hasClipboardSelection = ((agentCaps >> VDAgent.VD_AGENT_CAP_CLIPBOARD_SELECTION) & 1) != 0;
+        Span<uint> req = stackalloc uint[hasClipboardSelection ? 2 : 1];
+
+        if (hasClipboardSelection)
+            req[0] = 0;
+        req[^1] = VDAgent.VD_AGENT_CLIPBOARD_UTF8_TEXT;
+
+        var reply = new SpiceMsgcMainAgentData
+        {
+            protocol = VDAgent.VD_AGENT_PROTOCOL,
+            type = VDAgent.VD_AGENT_CLIPBOARD_GRAB,
+            opaque = 0,
+            size = (uint)(sizeof(uint) * req.Length)
+        };
+
+        var header = new SpiceMiniDataHeader
+        {
+            type = Spice.SPICE_MSGC_MAIN_AGENT_DATA,
+        };
+
+        SendAgentData(header, reply, req);
+        agentTokens--;
+    }
+
+}
+
+public sealed class RequestClipboardArgs : EventArgs
+{
+    public string? Clipboard { get; set; }
 }
 
 
@@ -217,4 +479,37 @@ public struct SpiceMsgcMainMouseMode
 {
     public ushort supported_modes;
     public ushort current_mode;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMsgcMainAgentStart
+{
+    public uint num_tokens;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMsgcMainAgentData
+{
+    public uint protocol;
+    public uint type;
+    public ulong opaque;
+    public uint size;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMsgMainAgentTokens
+{
+    public uint num_tokens;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceMsgClipboardRequest
+{
+    public uint num_tokens;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public unsafe struct SpiceMsgMainUuid
+{
+    public fixed byte uuid[16];
 }

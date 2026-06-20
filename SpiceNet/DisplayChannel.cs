@@ -14,7 +14,7 @@ public class DisplayChannel : BaseChannel
     public event EventHandler? Reset;
     public event EventHandler<SpiceSurface>? SurfaceCreate;
     public event EventHandler<SurfaceCopyBitsArgs>? SurfaceCopyBits;
-    public event EventHandler<SurfaceDrawFill>? SurfaceDrawFill;
+    public event EventHandler<SurfaceDrawFillArgs>? SurfaceDrawFill;
     public event EventHandler<uint>? SurfaceDestroy;
     public event EventHandler<SurfaceDrawCopyArgs>? SurfaceDrawCopy;
     public event EventHandler<List<ulong>>? SurfaceInvalidateList;
@@ -349,7 +349,7 @@ public class DisplayChannel : BaseChannel
                             break;
                         case SpiceBrushType.SPICE_BRUSH_TYPE_SOLID:
                             color = Unsafe.Read<uint>(relPtr.ToPointer());
-                            SurfaceDrawFill?.Invoke(this, new SurfaceDrawFill(bas, type, color, clipRects));
+                            SurfaceDrawFill?.Invoke(this, new SurfaceDrawFillArgs(bas, type, color, clipRects));
                             break;
                         case SpiceBrushType.SPICE_BRUSH_TYPE_PATTERN:
                             break;
@@ -524,14 +524,14 @@ public sealed class SurfaceCopyBitsArgs : EventArgs
     }
 }
 
-public sealed class SurfaceDrawFill : EventArgs
+public sealed class SurfaceDrawFillArgs : EventArgs
 {
     public SpiceMsgDisplayBase Display { get; }
     public SpiceBrushType Type { get; }
     public uint Color { get; }
     public List<SpiceRect> ClipRects { get; }
 
-    public SurfaceDrawFill(SpiceMsgDisplayBase display, SpiceBrushType type, uint color, List<SpiceRect> clipRects)
+    public SurfaceDrawFillArgs(SpiceMsgDisplayBase display, SpiceBrushType type, uint color, List<SpiceRect> clipRects)
     {
         Display = display;
         Type = type;

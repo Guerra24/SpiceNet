@@ -8,7 +8,7 @@ namespace SpiceNet;
 public class PlaybackChannel : BaseChannel
 {
     public event EventHandler<SpiceAudioDataMode>? Mode;
-    public event EventHandler<SpiceMsgRecordStart>? StartPlayback;
+    public event EventHandler<SpiceMsgPlaybackStart>? StartPlayback;
     public event EventHandler<PlaybackData>? Data;
     public event EventHandler? StopPlayback;
 
@@ -31,7 +31,7 @@ public class PlaybackChannel : BaseChannel
         {
             case Spice.SPICE_MSG_PLAYBACK_START:
                 {
-                    var start = Unsafe.Read<SpiceMsgRecordStart>(ptr);
+                    var start = Unsafe.Read<SpiceMsgPlaybackStart>(ptr);
                     StartPlayback?.Invoke(this, start);
                 }
                 break;
@@ -75,7 +75,7 @@ public sealed class PlaybackData : EventArgs
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct SpiceMsgRecordStart
+public struct SpiceMsgPlaybackStart
 {
     public uint channels;
     public SpiceAudioFmt format;

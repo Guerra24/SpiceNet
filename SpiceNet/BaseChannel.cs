@@ -356,6 +356,41 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
         NativeMemory.Free(ptr);
     }
 
+    protected unsafe void SendAgentData<T>(SpiceMiniDataHeader header, SpiceMsgcMainAgentData agent, T data) where T : unmanaged
+    {
+        var size = sizeof(SpiceMiniDataHeader) + sizeof(SpiceMsgcMainAgentData) + agent.size;
+        var ptr = NativeMemory.AllocZeroed((nuint)size);
+
+        header.size = (uint)(sizeof(SpiceMsgcMainAgentData) + agent.size);
+
+        Marshal.StructureToPtr(header, (nint)ptr, true);
+        Marshal.StructureToPtr(agent, (nint)ptr + sizeof(SpiceMiniDataHeader), true);
+        Marshal.StructureToPtr(data, (nint)ptr + sizeof(SpiceMiniDataHeader) + sizeof(SpiceMsgcMainAgentData), true);
+
+        var span = new Span<byte>(ptr, (int)size);
+
+        stream!.Write(span);
+        NativeMemory.Free(ptr);
+    }
+
+    protected unsafe void SendAgentData<T>(SpiceMiniDataHeader header, SpiceMsgcMainAgentData agent, Span<T> data) where T : unmanaged
+    {
+        var size = sizeof(SpiceMiniDataHeader) + sizeof(SpiceMsgcMainAgentData) + agent.size;
+        var ptr = NativeMemory.AllocZeroed((nuint)size);
+
+        header.size = (uint)(sizeof(SpiceMsgcMainAgentData) + agent.size);
+
+        Marshal.StructureToPtr(header, (nint)ptr, true);
+        Marshal.StructureToPtr(agent, (nint)ptr + sizeof(SpiceMiniDataHeader), true);
+
+        var span = new Span<byte>(ptr, (int)size);
+
+        MemoryMarshal.Cast<T, byte>(data)[..(int)agent.size].CopyTo(span.Slice(sizeof(SpiceMiniDataHeader) + sizeof(SpiceMsgcMainAgentData), (int)agent.size));
+
+        stream!.Write(span);
+        NativeMemory.Free(ptr);
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var channel in channels)

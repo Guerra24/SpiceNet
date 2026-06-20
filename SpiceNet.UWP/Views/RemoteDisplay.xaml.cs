@@ -11,6 +11,7 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Devices.Input;
 using Windows.Graphics.DirectX;
 using Windows.Media;
@@ -53,6 +54,8 @@ public sealed partial class RemoteDisplay : Page
     private AudioDeviceOutputNode deviceOutputNode = null!;
     private SpiceAudioDataMode audioDataMode = SpiceAudioDataMode.SPICE_AUDIO_DATA_MODE_RAW;
 
+    private DispatcherQueueTimer resizeDebouncer;
+
     public RemoteDisplay(string address, int port)
     {
         InitializeComponent();
@@ -72,6 +75,8 @@ public sealed partial class RemoteDisplay : Page
         ElementCompositionPreview.SetElementChildVisual(RootCanvas, cursorVisual);
 
         Window.Current.SetTitleBar(Titlebar);
+
+        resizeDebouncer = dispatcherQueue.CreateTimer();
     }
 
     private void Dispatcher_AcceleratorKeyActivated(CoreDispatcher sender, AcceleratorKeyEventArgs args)
@@ -100,6 +105,7 @@ public sealed partial class RemoteDisplay : Page
     private void RootCanvas_GotFocus(object sender, RoutedEventArgs e)
     {
         coreWindow.Dispatcher.AcceleratorKeyActivated += Dispatcher_AcceleratorKeyActivated;
+        Data.Channel?.NotifyClipboard();
     }
 
     private void RootCanvas_LostFocus(object sender, RoutedEventArgs e)
@@ -149,7 +155,35 @@ public sealed partial class RemoteDisplay : Page
         Data.Channel?.PlaybackInit += PlaybackInit;
         Data.Channel?.MouseModeChanged += MouseModeChanged;
         Data.Channel?.OnDisconnected += OnDisconnected;
+        Data.Channel?.ReceiveClipboard += ReceiveClipboard;
+        Data.Channel?.SendClipboard += SendClipboard;
         Data.Channel?.Start();
+    }
+
+    private void ReceiveClipboard(object? sender, string e)
+    {
+        dispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
+        {
+            var dataPackage = new DataPackage
+            {
+                RequestedOperation = DataPackageOperation.Copy
+            };
+            dataPackage.SetText(e);
+            Clipboard.SetContent(dataPackage);
+        });
+    }
+
+    private void SendClipboard(object? sender, RequestClipboardArgs e)
+    {
+        e.Clipboard = dispatcherQueue.EnqueueAsync(async () =>
+        {
+            var dataPackageView = Clipboard.GetContent();
+            if (dataPackageView.Contains(StandardDataFormats.Text))
+            {
+                return await dataPackageView.GetTextAsync();
+            }
+            return null;
+        }, DispatcherQueuePriority.High).GetAwaiter().GetResult();
     }
 
     private void DisplayInit(object? sender, DisplayChannel channel)
@@ -327,7 +361,7 @@ public sealed partial class RemoteDisplay : Page
         }
     }
 
-    private void Display_SurfaceDrawFill(object? sender, SurfaceDrawFill e)
+    private void Display_SurfaceDrawFill(object? sender, SurfaceDrawFillArgs e)
     {
         if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
@@ -392,7 +426,15 @@ public sealed partial class RemoteDisplay : Page
         ScrollViewer.ChangeView(null, null, zoomFactor, true);
     }
 
-    private void ScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e) => FitCanvas();
+    private void ScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (Data.AutoResizeGuest)
+            resizeDebouncer.Debounce(() =>
+            {
+                Data.Channel?.ResizeMonitor((uint)e.NewSize.Width, (uint)e.NewSize.Height - (uint)(ScrollViewer.BorderThickness.Top + ScrollViewer.BorderThickness.Bottom));
+            }, TimeSpan.FromSeconds(1));
+        FitCanvas();
+    }
 
     private void RootCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -702,7 +744,7 @@ public sealed partial class RemoteDisplay : Page
 
     private void Playback_Mode(object? sender, SpiceAudioDataMode e) => audioDataMode = e;
 
-    private void Playback_Start(object? sender, SpiceMsgRecordStart e)
+    private void Playback_Start(object? sender, SpiceMsgPlaybackStart e)
     {
         var properties = AudioEncodingProperties.CreatePcm(e.frequency, e.channels, 16);
         //if (audioDataMode == SpiceAudioDataMode.SPICE_AUDIO_DATA_MODE_OPUS)

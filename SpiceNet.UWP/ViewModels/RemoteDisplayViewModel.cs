@@ -21,6 +21,12 @@ public partial class RemoteDisplayViewModel : ObservableObject
     private FitMode _fitMode = FitMode.OneToOne;
 
     [ObservableProperty]
+    private string _name = string.Empty;
+
+    [ObservableProperty]
+    private Guid? _guid;
+
+    [ObservableProperty]
     private string _errorMessage = string.Empty;
 
     public event EventHandler? FitModeChanged;
@@ -34,6 +40,8 @@ public partial class RemoteDisplayViewModel : ObservableObject
             Channel = new MainChannel(new IPEndPoint(host.AddressList[0], port));
             Channel.OnDisconnected += Channel_OnDisconnected;
             Channel.OnError += Channel_OnError;
+            Channel.Name += GuestName;
+            Channel.Guid += GuestGuid;
         }
         catch (Exception e)
         {
@@ -66,4 +74,23 @@ public partial class RemoteDisplayViewModel : ObservableObject
             ErrorMessage = e.Message;
         });
     }
+
+
+    private void GuestName(object? sender, string e)
+    {
+        dispatcherQueue.TryEnqueue(() =>
+        {
+            Name = e;
+        });
+    }
+
+    private void GuestGuid(object? sender, Guid e)
+    {
+        dispatcherQueue.TryEnqueue(() =>
+        {
+            Guid = e;
+        });
+    }
+
+
 }
