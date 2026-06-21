@@ -163,7 +163,6 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
                 NativeMemory.Free(ptr);
             }
 
-
             unsafe
             {
                 var ptr = NativeMemory.AllocZeroed(sizeof(int));
@@ -187,19 +186,11 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
                     var span = new Span<byte>(ptr, sizeof(SpiceMiniDataHeader));
                     stream.ReadExactly(span);
 
-                    var hdr = Marshal.PtrToStructure<SpiceMiniDataHeader>((nint)ptr);
+                    var hdr = Unsafe.Read<SpiceMiniDataHeader>(ptr);
 
                     //Debug.WriteLine($"Type: {hdr.type} Size: {hdr.size}");
 
-                    if (hdr.size == 0)
-                    {
-                        ProcessCommonMessage(hdr);
-                    }
-                    else
-                    {
-                        ProcessCommonMessage(hdr);
-                    }
-
+                    ProcessCommonMessage(hdr);
                 }
                 catch
                 {
@@ -317,8 +308,7 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
     {
         var ptr = NativeMemory.AllocZeroed((nuint)(sizeof(SpiceMiniDataHeader) + reply.size));
 
-        Marshal.StructureToPtr(reply, (nint)ptr, true);
-        //Marshal.Copy(data, 0, (nint)ptr + sizeof(SpiceMiniDataHeader), reply.size);
+        Unsafe.Write(ptr, reply);
 
         var span = new Span<byte>(ptr, (int)(sizeof(SpiceMiniDataHeader) + reply.size));
 
@@ -332,7 +322,7 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
     {
         var ptr = NativeMemory.AllocZeroed((nuint)sizeof(SpiceMiniDataHeader));
 
-        Marshal.StructureToPtr(reply, (nint)ptr, true);
+        Unsafe.Write(ptr, reply);
 
         var span = new Span<byte>(ptr, sizeof(SpiceMiniDataHeader));
 
@@ -347,7 +337,7 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
 
         reply.size = (uint)sizeof(T);
 
-        Marshal.StructureToPtr(reply, (nint)ptr, true);
+        Unsafe.Write(ptr, reply);
         Marshal.StructureToPtr(data, (nint)ptr + sizeof(SpiceMiniDataHeader), true);
 
         var span = new Span<byte>(ptr, size);
@@ -363,7 +353,7 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
 
         header.size = (uint)(sizeof(SpiceMsgcMainAgentData) + agent.size);
 
-        Marshal.StructureToPtr(header, (nint)ptr, true);
+        Unsafe.Write(ptr, header);
         Marshal.StructureToPtr(agent, (nint)ptr + sizeof(SpiceMiniDataHeader), true);
         Marshal.StructureToPtr(data, (nint)ptr + sizeof(SpiceMiniDataHeader) + sizeof(SpiceMsgcMainAgentData), true);
 
@@ -380,7 +370,7 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
 
         header.size = (uint)(sizeof(SpiceMsgcMainAgentData) + agent.size);
 
-        Marshal.StructureToPtr(header, (nint)ptr, true);
+        Unsafe.Write(ptr, header);
         Marshal.StructureToPtr(agent, (nint)ptr + sizeof(SpiceMiniDataHeader), true);
 
         var span = new Span<byte>(ptr, (int)size);

@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceSurfaceFmt
+public enum SpiceSurfaceFmt : uint
 {
     SPICE_SURFACE_FMT_INVALID,
     SPICE_SURFACE_FMT_1_A,

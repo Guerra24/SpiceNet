@@ -234,8 +234,6 @@ public static partial class Spice
     public const int SPICE_MOUSE_MODE_CLIENT = 1 << 1;
     public const int SPICE_MOUSE_MODE_MASK = 0x3;
 
-    public const int SPICE_SURFACE_FLAGS_PRIMARY = 1 << 0;
-
     public const int SPICE_IMAGE_FLAGS_CACHE_ME = 1 << 0;
 
     public const int SPICE_SCROLL_LOCK_MODIFIER = 1 << 0;

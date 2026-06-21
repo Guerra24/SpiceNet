@@ -1,4 +1,6 @@
 ﻿using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Brushes;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.UI;
 using Microsoft.Graphics.Canvas.UI.Composition;
@@ -27,6 +29,7 @@ namespace SpiceNet.UWP.Views;
 
 public sealed partial class RemoteDisplay : Page
 {
+
     private DispatcherQueue dispatcherQueue = DispatcherQueue.GetForCurrentThread();
 
     private RemoteDisplayViewModel Data;
@@ -193,6 +196,9 @@ public sealed partial class RemoteDisplay : Page
         channel.SurfaceDrawCopy += Display_SurfaceDrawCopy;
         channel.SurfaceCopyBits += Display_SurfaceCopyBits;
         channel.SurfaceDrawFill += Display_SurfaceDrawFill;
+        channel.SurfaceDrawWB += Display_SurfaceDrawWB;
+        channel.SurfaceDrawAlphaBlend += Display_SurfaceDrawAlphaBlend;
+        channel.SurfaceDrawTransparent += Display_SurfaceDrawTransparent;
         channel.SurfaceInvalidateList += Display_SurfaceInvalidateList;
     }
 
@@ -258,7 +264,7 @@ public sealed partial class RemoteDisplay : Page
     {
         dispatcherQueue.TryEnqueue(DispatcherQueuePriority.High, () =>
         {
-            if ((e.flags & Spice.SPICE_SURFACE_FLAGS_PRIMARY) == 1)
+            if (e.flags.HasFlag(SpiceSurfaceFlags.SPICE_SURFACE_FLAGS_PRIMARY))
             {
                 RootCanvas.Width = e.width;
                 RootCanvas.Height = e.height;
@@ -283,46 +289,44 @@ public sealed partial class RemoteDisplay : Page
     {
         if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
-            if (bitmaps.TryGetValue(e.ImageDescriptor.id, out var bitmap))
+            if (bitmaps.TryGetValue(e.Bitmap.descriptor.id, out var bitmap))
             {
-                if (e.Image.Length > 0)
-                    bitmap.SetPixelBytes(e.Image);
+                if (e.Bitmap.image.Length > 0)
+                    bitmap.SetPixelBytes(e.Bitmap.image);
             }
             else
             {
-                if (e.Image.Length == 0)
+                if (e.Bitmap.image.Length == 0)
                     return;
 
-                bitmap = CanvasBitmap.CreateFromBytes(surface, e.Image, (int)e.ImageDescriptor.width, (int)e.ImageDescriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
+                bitmap = CanvasBitmap.CreateFromBytes(surface, e.Bitmap.image, (int)e.Bitmap.descriptor.width, (int)e.Bitmap.descriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
 
-                if (e.ImageDescriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME))
-                    bitmaps.Add(e.ImageDescriptor.id, bitmap);
+                if (e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME))
+                    bitmaps.Add(e.Bitmap.descriptor.id, bitmap);
             }
 
             var rect = e.Display.box.ToRect();
 
-            using (var ds = surface.CreateDrawingSession())
+            using var ds = surface.CreateDrawingSession();
+            if (e.ClipRects.Count > 0)
             {
-                if (e.ClipRects.Count > 0)
+                var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                for (int i = 0; i < e.ClipRects.Count; i++)
                 {
-                    var layers = new CanvasGeometry[e.ClipRects.Count];
-
-                    for (int i = 0; i < e.ClipRects.Count; i++)
-                    {
-                        var clipRect = e.ClipRects[i];
-                        layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
-                    }
-
-                    using var group = CanvasGeometry.CreateGroup(surface, layers);
-                    using var layer = ds.CreateLayer(1.0f, group);
-
-                    ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
+                    var clipRect = e.ClipRects[i];
+                    layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
                 }
-                else
-                {
-                    ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
-                }
+
+                using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var layer = ds.CreateLayer(1.0f, group);
+                ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
             }
+            else
+            {
+                ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
+            }
+            //ds.DrawRectangle(rect, Colors.Red);
         }
     }
 
@@ -336,28 +340,26 @@ public sealed partial class RemoteDisplay : Page
 
             bitmap.CopyPixelsFromBitmap(surface, 0, 0, e.Point.x, e.Point.y, (int)rect.Width, (int)rect.Height);
 
-            using (var ds = surface.CreateDrawingSession())
+            using var ds = surface.CreateDrawingSession();
+            if (e.ClipRects.Count > 0)
             {
-                if (e.ClipRects.Count > 0)
+                var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                for (int i = 0; i < e.ClipRects.Count; i++)
                 {
-                    var layers = new CanvasGeometry[e.ClipRects.Count];
-
-                    for (int i = 0; i < e.ClipRects.Count; i++)
-                    {
-                        var clipRect = e.ClipRects[i];
-                        layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
-                    }
-
-                    using var group = CanvasGeometry.CreateGroup(surface, layers);
-                    using var layer = ds.CreateLayer(1.0f, group);
-
-                    ds.DrawImage(bitmap, rect, bitmap.Bounds);
+                    var clipRect = e.ClipRects[i];
+                    layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
                 }
-                else
-                {
-                    ds.DrawImage(bitmap, rect, bitmap.Bounds);
-                }
+
+                using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var layer = ds.CreateLayer(1.0f, group);
+                ds.DrawImage(bitmap, rect, bitmap.Bounds);
             }
+            else
+            {
+                ds.DrawImage(bitmap, rect, bitmap.Bounds);
+            }
+            //ds.DrawRectangle(rect, Colors.Red);
         }
     }
 
@@ -365,30 +367,214 @@ public sealed partial class RemoteDisplay : Page
     {
         if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
-            using (var ds = surface.CreateDrawingSession())
+            using var ds = surface.CreateDrawingSession();
+            switch (e.Type)
             {
-                var rawColor = e.Color & 0xffffff;
-                var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
-                if (e.ClipRects.Count > 0)
-                {
-                    var layers = new CanvasGeometry[e.ClipRects.Count];
-
-                    for (int i = 0; i < e.ClipRects.Count; i++)
+                case SpiceBrushType.SPICE_BRUSH_TYPE_SOLID:
                     {
-                        var clipRect = e.ClipRects[i];
-                        layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                        var rawColor = e.Color & 0xffffff;
+                        var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
+                        var rect = e.Display.box.ToRect();
+                        if (e.ClipRects.Count > 0)
+                        {
+                            var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                            for (int i = 0; i < e.ClipRects.Count; i++)
+                            {
+                                var clipRect = e.ClipRects[i];
+                                layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                            }
+
+                            using var group = CanvasGeometry.CreateGroup(surface, layers);
+                            using var layer = ds.CreateLayer(1.0f, group);
+                            ds.FillRectangle(rect, color);
+                        }
+                        else
+                        {
+                            ds.FillRectangle(rect, color);
+                        }
+                        //ds.DrawRectangle(rect, Colors.Red);
                     }
+                    break;
+                case SpiceBrushType.SPICE_BRUSH_TYPE_PATTERN:
+                    {
+                        if (bitmaps.TryGetValue(e.Pattern.descriptor.id, out var bitmap))
+                        {
+                            if (e.Pattern.image.Length > 0)
+                                bitmap.SetPixelBytes(e.Pattern.image);
+                        }
+                        else
+                        {
+                            if (e.Pattern.image.Length == 0)
+                                return;
 
-                    using var group = CanvasGeometry.CreateGroup(surface, layers);
+                            bitmap = CanvasBitmap.CreateFromBytes(surface, e.Pattern.image, (int)e.Pattern.descriptor.width, (int)e.Pattern.descriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
 
-                    ds.FillGeometry(group, color);
-                }
-                else
-                {
-                    ds.FillRectangle(e.Display.box.ToRect(), color);
-                }
+                            if (e.Pattern.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME))
+                                bitmaps.Add(e.Pattern.descriptor.id, bitmap);
+                        }
 
+                        var rect = e.Display.box.ToRect();
+
+                        using var brush = new CanvasImageBrush(surface, bitmap);
+                        brush.ExtendX = CanvasEdgeBehavior.Wrap;
+                        brush.ExtendY = CanvasEdgeBehavior.Wrap;
+                        brush.Transform = Matrix3x2.CreateTranslation(e.Position.x, e.Position.y);
+
+                        if (e.ClipRects.Count > 0)
+                        {
+                            var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                            for (int i = 0; i < e.ClipRects.Count; i++)
+                            {
+                                var clipRect = e.ClipRects[i];
+                                layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                            }
+
+                            using var group = CanvasGeometry.CreateGroup(surface, layers);
+                            using var layer = ds.CreateLayer(1.0f, group);
+                            ds.FillRectangle(rect, brush);
+                        }
+                        else
+                        {
+                            ds.FillRectangle(rect, brush);
+                        }
+                        //ds.DrawRectangle(rect, Colors.Red);
+                    }
+                    break;
             }
+        }
+    }
+
+    private void Display_SurfaceDrawWB(object? sender, SurfaceDrawWBArgs e)
+    {
+        if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
+        {
+            using var ds = surface.CreateDrawingSession();
+            var rawColor = e.Color & 0xffffff;
+            var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
+            var rect = e.Display.box.ToRect();
+            if (e.ClipRects.Count > 0)
+            {
+                var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                for (int i = 0; i < e.ClipRects.Count; i++)
+                {
+                    var clipRect = e.ClipRects[i];
+                    layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                }
+
+                using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var layer = ds.CreateLayer(1.0f, group);
+                ds.FillRectangle(rect, color);
+            }
+            else
+            {
+                ds.FillRectangle(rect, color);
+            }
+            //ds.DrawRectangle(rect, Colors.Red);
+        }
+    }
+
+    private void Display_SurfaceDrawAlphaBlend(object? sender, SurfaceDrawAlphaBlendArgs e)
+    {
+        if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
+        {
+            if (bitmaps.TryGetValue(e.Bitmap.descriptor.id, out var bitmap))
+            {
+                if (e.Bitmap.image.Length > 0)
+                    bitmap.SetPixelBytes(e.Bitmap.image);
+            }
+            else
+            {
+                if (e.Bitmap.image.Length == 0)
+                    return;
+
+                bitmap = CanvasBitmap.CreateFromBytes(surface, e.Bitmap.image, (int)e.Bitmap.descriptor.width, (int)e.Bitmap.descriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
+
+                if (e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME))
+                    bitmaps.Add(e.Bitmap.descriptor.id, bitmap);
+            }
+
+            var rect = e.Display.box.ToRect();
+
+            using var ds = surface.CreateDrawingSession();
+            if (e.ClipRects.Count > 0)
+            {
+                var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                for (int i = 0; i < e.ClipRects.Count; i++)
+                {
+                    var clipRect = e.ClipRects[i];
+                    layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                }
+
+                using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var layer = ds.CreateLayer(e.Alpha, group);
+                ds.DrawImage(bitmap, rect, e.Source.ToRect());
+            }
+            else
+            {
+                using var layer = ds.CreateLayer(e.Alpha);
+                ds.DrawImage(bitmap, rect, e.Source.ToRect());
+            }
+            //ds.DrawRectangle(rect, Colors.Red);
+        }
+    }
+
+    private void Display_SurfaceDrawTransparent(object? sender, SurfaceDrawTransparentArgs e)
+    {
+        if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
+        {
+            if (bitmaps.TryGetValue(e.Bitmap.descriptor.id, out var bitmap))
+            {
+                if (e.Bitmap.image.Length > 0)
+                    bitmap.SetPixelBytes(e.Bitmap.image);
+            }
+            else
+            {
+                if (e.Bitmap.image.Length == 0)
+                    return;
+
+                bitmap = CanvasBitmap.CreateFromBytes(surface, e.Bitmap.image, (int)e.Bitmap.descriptor.width, (int)e.Bitmap.descriptor.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
+
+                if (e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME))
+                    bitmaps.Add(e.Bitmap.descriptor.id, bitmap);
+            }
+
+            var rect = e.Display.box.ToRect();
+
+            using var ds = surface.CreateDrawingSession();
+
+            var rawColor = e.Transparent.transparent_color & 0xffffff;
+            var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
+
+            using var key = new ChromaKeyEffect
+            {
+                Source = bitmap,
+                Color = color,
+                Tolerance = 0.01f,
+            };
+
+            if (e.ClipRects.Count > 0)
+            {
+                var layers = new CanvasGeometry[e.ClipRects.Count];
+
+                for (int i = 0; i < e.ClipRects.Count; i++)
+                {
+                    var clipRect = e.ClipRects[i];
+                    layers[i] = CanvasGeometry.CreateRectangle(surface, clipRect.ToRect());
+                }
+
+                using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var layer = ds.CreateLayer(1.0f, group);
+                ds.DrawImage(key, rect, e.Transparent.source_area.ToRect());
+            }
+            else
+            {
+                ds.DrawImage(key, rect, e.Transparent.source_area.ToRect());
+            }
+            //ds.DrawRectangle(rect, Colors.Red);
         }
     }
 

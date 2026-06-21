@@ -17,6 +17,9 @@ public class DisplayChannel : BaseChannel
     public event EventHandler<SurfaceDrawFillArgs>? SurfaceDrawFill;
     public event EventHandler<uint>? SurfaceDestroy;
     public event EventHandler<SurfaceDrawCopyArgs>? SurfaceDrawCopy;
+    public event EventHandler<SurfaceDrawWBArgs>? SurfaceDrawWB;
+    public event EventHandler<SurfaceDrawAlphaBlendArgs>? SurfaceDrawAlphaBlend;
+    public event EventHandler<SurfaceDrawTransparentArgs>? SurfaceDrawTransparent;
     public event EventHandler<List<ulong>>? SurfaceInvalidateList;
 
     public DisplayChannel(IPEndPoint endpoint, byte channelId, uint connectionId) : base(endpoint)
@@ -74,266 +77,30 @@ public class DisplayChannel : BaseChannel
                 break;
             case Spice.SPICE_MSG_DISPLAY_DRAW_COPY:
                 {
-                    var outputImage = Array.Empty<byte>();
-                    var bas = Marshal.PtrToStructure<SpiceMsgDisplayBase>(relPtr);
+                    var bas = Unsafe.Read<SpiceMsgDisplayBase>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceMsgDisplayBase);
 
                     var clipRects = ReadClipRects(ref relPtr, bas);
 
-                    var copy = Marshal.PtrToStructure<SpiceCopy>(relPtr);
-
-                    if (copy.offset != 0)
-                    {
-                        nint descriptorBase = (nint)((nint)ptr + copy.offset);
-                        var imageDescriptor = Marshal.PtrToStructure<SpiceImageDescriptor>(descriptorBase);
-                        descriptorBase += sizeof(SpiceImageDescriptor);
-                        bool flipY = false;
-
-                        //Debug.WriteLine((SpiceImageType)imageDescriptor.type);
-
-                        switch (imageDescriptor.type)
-                        {
-                            case SpiceImageType.SPICE_IMAGE_TYPE_BITMAP:
-                                {
-                                    var format = (SpiceBitmapFmt)Unsafe.Read<byte>(descriptorBase.ToPointer());
-                                    descriptorBase += sizeof(byte);
-
-                                    var flags = Unsafe.Read<byte>(descriptorBase.ToPointer());
-                                    descriptorBase += sizeof(byte);
-
-                                    var x = Unsafe.Read<uint>(descriptorBase.ToPointer());
-                                    descriptorBase += sizeof(uint);
-
-                                    var y = Unsafe.Read<uint>(descriptorBase.ToPointer());
-                                    descriptorBase += sizeof(uint);
-
-                                    var stride = Unsafe.Read<uint>(descriptorBase.ToPointer());
-                                    descriptorBase += sizeof(uint);
-
-                                    if ((flags & (1 << 1)) != 0)
-                                    {
-                                        // palette id long
-                                        descriptorBase += sizeof(ulong);
-                                    }
-
-                                    //var offset = Unsafe.Read<uint>(descriptorBase.ToPointer());
-                                    descriptorBase += sizeof(uint);
-
-                                    /*if(offset != 0)
-                                    {
-                                        // unique
-                                        descriptorBase += sizeof(ulong);
-                                        var num_ents = Unsafe.Read<ushort>(descriptorBase.ToPointer());
-                                        descriptorBase += sizeof(ushort);
-
-                                        descriptorBase += sizeof(uint) * num_ents;
-                                    }*/
-
-                                    switch (format)
-                                    {
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_INVALID:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_1BIT_LE:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_1BIT_BE:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_4BIT_LE:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_4BIT_BE:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_8BIT:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_16BIT:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_24BIT:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_32BIT:
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_RGBA:
-
-                                            var pixels = x * y;
-                                            var output = (byte*)NativeMemory.Alloc(pixels * 4);
-
-                                            for (int i = 0; i < pixels * 4; i += 4)
-                                            {
-                                                output[i] = Unsafe.Read<byte>((descriptorBase + i).ToPointer());
-                                                output[i + 1] = Unsafe.Read<byte>((descriptorBase + i + 1).ToPointer());
-                                                output[i + 2] = Unsafe.Read<byte>((descriptorBase + i + 2).ToPointer());
-                                                if (format == SpiceBitmapFmt.SPICE_BITMAP_FMT_RGBA)
-                                                {
-                                                    output[i + 3] = Unsafe.Read<byte>((descriptorBase + i + 3).ToPointer());
-
-                                                    var alpha = output[i + 3] / 255;
-                                                    output[i] = (byte)(output[i] * alpha);
-                                                    output[i + 1] = (byte)(output[i + 1] * alpha);
-                                                    output[i + 2] = (byte)(output[i + 2] * alpha);
-                                                }
-                                                else
-                                                {
-                                                    output[i + 3] = 0xff;
-                                                }
-                                            }
-
-                                            if ((flags & (1 << 2)) == 0)
-                                            {
-                                                var temp = (byte*)NativeMemory.Alloc(pixels * 4);
-                                                for (int i = 0; i < y; i++)
-                                                {
-                                                    NativeMemory.Copy(output + i * stride, temp + (y - 1 - i) * stride, stride);
-                                                }
-                                                NativeMemory.Free(output);
-                                                output = temp;
-                                            }
-
-                                            var span = new Span<byte>(output, (int)pixels * 4);
-
-                                            outputImage = span.ToArray();
-
-                                            NativeMemory.Free(output);
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_8BIT_A:
-                                            break;
-                                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_ENUM_END:
-                                            break;
-                                    }
-
-                                }
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_QUIC:
-                                {
-                                    var dataSize = Marshal.ReadInt32(descriptorBase);
-                                    descriptorBase += sizeof(int);
-
-                                    var usrContext = Quic.quic_create_usr_context();
-                                    var decoder = Quic.quic_create(usrContext);
-
-                                    var type = new QuicImageType();
-                                    int width, height;
-                                    var res = Quic.quic_decode_begin(decoder, (uint*)descriptorBase, (uint)dataSize, &type, &width, &height);
-
-                                    var output = (byte*)NativeMemory.Alloc((nuint)(width * height * 4));
-
-                                    res = Quic.quic_decode(decoder, type, output, width * 4);
-
-                                    var span = new Span<byte>(output, width * height * 4);
-
-                                    for (int i = 0; i < width * height * 4; i += 4)
-                                    {
-                                        if (type == QuicImageType.QUIC_IMAGE_TYPE_RGBA)
-                                        {
-                                            var alpha = output[i + 3] / 255;
-                                            output[i] = (byte)(output[i] * alpha);
-                                            output[i + 1] = (byte)(output[i + 1] * alpha);
-                                            output[i + 2] = (byte)(output[i + 2] * alpha);
-                                        }
-                                        else
-                                        {
-                                            output[i + 3] = 0xff;
-                                        }
-                                    }
-
-                                    outputImage = span.ToArray();
-
-                                    Quic.quic_destroy(decoder);
-                                    Quic.quic_destroy_usr_context(usrContext);
-                                    NativeMemory.Free(output);
-                                }
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_RESERVED:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_LZ_PLT:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_LZ_RGB:
-                                {
-                                    var dataSize = Marshal.ReadInt32(descriptorBase);
-                                    descriptorBase += sizeof(int);
-
-                                    var lzUsrContext = Lz.lz_create_usr_context();
-                                    var lzDecoder = Lz.lz_create(lzUsrContext);
-
-                                    var type = new LzImageType();
-                                    int width, height, pixels, topDown;
-                                    var palette = new SpicePalette();
-                                    Lz.lz_decode_begin(lzDecoder, (byte*)descriptorBase, (uint)dataSize, &type, &width, &height, &pixels, &topDown, &palette);
-
-                                    flipY = topDown == 0;
-
-                                    var output = (byte*)NativeMemory.Alloc((nuint)(pixels * 4));
-
-                                    Lz.lz_decode(lzDecoder, type, output);
-
-                                    if (topDown == 0)
-                                    {
-                                        var temp = (byte*)NativeMemory.Alloc((nuint)(pixels * 4));
-                                        var stride = width * 4;
-                                        for (int i = 0; i < height; i++)
-                                        {
-                                            NativeMemory.Copy(output + i * stride, temp + (height - 1 - i) * stride, (nuint)stride);
-                                        }
-                                        NativeMemory.Free(output);
-                                        output = temp;
-                                    }
-
-                                    var span = new Span<byte>(output, pixels * 4);
-
-                                    for (int i = 0; i < pixels * 4; i += 4)
-                                    {
-                                        if (type == LzImageType.LZ_IMAGE_TYPE_RGBA)
-                                        {
-                                            var alpha = output[i + 3] / 255;
-                                            output[i] = (byte)(output[i] * alpha);
-                                            output[i + 1] = (byte)(output[i + 1] * alpha);
-                                            output[i + 2] = (byte)(output[i + 2] * alpha);
-                                        }
-                                        else
-                                        {
-                                            output[i + 3] = 0xff;
-                                        }
-                                    }
-
-                                    outputImage = span.ToArray();
-
-                                    Lz.lz_destroy(lzDecoder);
-                                    Lz.lz_destroy_usr_context(lzUsrContext);
-                                    NativeMemory.Free(output);
-                                }
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_GLZ_RGB:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_SURFACE:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_JPEG:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE_LOSSLESS:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_ZLIB_GLZ_RGB:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_JPEG_ALPHA:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_LZ4:
-                                break;
-                            case SpiceImageType.SPICE_IMAGE_TYPE_ENUM_END:
-                                break;
-                        }
-
-                        SurfaceDrawCopy?.Invoke(this, new SurfaceDrawCopyArgs(bas, copy, imageDescriptor, clipRects, outputImage, flipY));
-                    }
-
+                    var copy = Unsafe.Read<SpiceCopy>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceCopy);
 
-                    var masq = Marshal.PtrToStructure<SpiceQMask>(relPtr);
+                    var bitmap = ReadImage((nint)ptr, copy.offset, true);
+
+                    var qmask = Unsafe.Read<SpiceQMask>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceQMask);
 
-                    if (masq.offset != 0)
-                    {
+                    SpiceImage? mask = null;
 
-                    }
+                    if (qmask.offset != 0)
+                        mask = ReadImage((nint)ptr, qmask.offset);
+
+                    SurfaceDrawCopy?.Invoke(this, new SurfaceDrawCopyArgs(bas, clipRects, copy, bitmap));
                 }
                 break;
             case Spice.SPICE_MSG_DISPLAY_DRAW_FILL:
                 {
-                    var bas = Marshal.PtrToStructure<SpiceMsgDisplayBase>(relPtr);
+                    var bas = Unsafe.Read<SpiceMsgDisplayBase>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceMsgDisplayBase);
 
                     var clipRects = ReadClipRects(ref relPtr, bas);
@@ -348,10 +115,36 @@ public class DisplayChannel : BaseChannel
                         case SpiceBrushType.SPICE_BRUSH_TYPE_NONE:
                             break;
                         case SpiceBrushType.SPICE_BRUSH_TYPE_SOLID:
-                            color = Unsafe.Read<uint>(relPtr.ToPointer());
-                            SurfaceDrawFill?.Invoke(this, new SurfaceDrawFillArgs(bas, type, color, clipRects));
+                            {
+                                color = Unsafe.Read<uint>(relPtr.ToPointer());
+                                relPtr += sizeof(uint);
+
+                                var rop_descriptor = Unsafe.Read<SpiceRopd>(relPtr.ToPointer());
+                                relPtr += sizeof(SpiceRopd);
+
+                                var qmask = Unsafe.Read<SpiceQMask>(relPtr.ToPointer());
+                                relPtr += sizeof(SpiceQMask);
+
+                                SpiceImage? mask = null;
+
+                                if (qmask.offset != 0)
+                                    mask = ReadImage((nint)ptr, qmask.offset);
+
+                                SurfaceDrawFill?.Invoke(this, new SurfaceDrawFillArgs(bas, type, clipRects, color));
+                            }
                             break;
                         case SpiceBrushType.SPICE_BRUSH_TYPE_PATTERN:
+                            {
+                                var offset = Unsafe.Read<uint>(relPtr.ToPointer());
+                                relPtr += sizeof(uint);
+
+                                var position = Unsafe.Read<SpicePoint>(relPtr.ToPointer());
+                                relPtr += sizeof(SpiceRopd);
+
+                                var pattern = ReadImage((nint)ptr, offset);
+
+                                SurfaceDrawFill?.Invoke(this, new SurfaceDrawFillArgs(bas, type, clipRects, pattern, position));
+                            }
                             break;
                     }
 
@@ -364,10 +157,40 @@ public class DisplayChannel : BaseChannel
                 // TODO
                 break;
             case Spice.SPICE_MSG_DISPLAY_DRAW_BLACKNESS:
-                // TODO
+                {
+                    var bas = Unsafe.Read<SpiceMsgDisplayBase>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceMsgDisplayBase);
+
+                    var clipRects = ReadClipRects(ref relPtr, bas);
+
+                    var qmask = Unsafe.Read<SpiceQMask>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceQMask);
+
+                    SpiceImage? mask = null;
+
+                    if (qmask.offset != 0)
+                        mask = ReadImage((nint)ptr, qmask.offset);
+
+                    SurfaceDrawWB?.Invoke(this, new SurfaceDrawWBArgs(bas, 0x0, clipRects));
+                }
                 break;
             case Spice.SPICE_MSG_DISPLAY_DRAW_WHITENESS:
-                // TODO
+                {
+                    var bas = Unsafe.Read<SpiceMsgDisplayBase>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceMsgDisplayBase);
+
+                    var clipRects = ReadClipRects(ref relPtr, bas);
+
+                    var qmask = Unsafe.Read<SpiceQMask>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceQMask);
+
+                    SpiceImage? mask = null;
+
+                    if (qmask.offset != 0)
+                        mask = ReadImage((nint)ptr, qmask.offset);
+
+                    SurfaceDrawWB?.Invoke(this, new SurfaceDrawWBArgs(bas, 0xffffff, clipRects));
+                }
                 break;
             case Spice.SPICE_MSG_DISPLAY_DRAW_INVERS:
                 // TODO
@@ -379,19 +202,51 @@ public class DisplayChannel : BaseChannel
                 // TODO
                 break;
             case Spice.SPICE_MSG_DISPLAY_DRAW_TRANSPARENT:
-                // TODO
-                break;
-            case Spice.SPICE_MSG_DISPLAY_DRAW_ALPHA_BLEND:
-                // TODO
-                break;
-            case Spice.SPICE_MSG_DISPLAY_COPY_BITS:
                 {
-                    var bas = Marshal.PtrToStructure<SpiceMsgDisplayBase>(relPtr);
+                    var bas = Unsafe.Read<SpiceMsgDisplayBase>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceMsgDisplayBase);
 
                     var clipRects = ReadClipRects(ref relPtr, bas);
 
-                    var srcPoint = Marshal.PtrToStructure<SpicePoint>(relPtr);
+                    var transparent = Unsafe.Read<SpiceTransparent>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceTransparent);
+
+                    var bitmap = ReadImage((nint)ptr, transparent.source_image);
+
+                    SurfaceDrawTransparent?.Invoke(this, new SurfaceDrawTransparentArgs(bas, clipRects, transparent, bitmap));
+                }
+                break;
+            case Spice.SPICE_MSG_DISPLAY_DRAW_ALPHA_BLEND:
+                {
+                    var bas = Unsafe.Read<SpiceMsgDisplayBase>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceMsgDisplayBase);
+
+                    var clipRects = ReadClipRects(ref relPtr, bas);
+
+                    relPtr += sizeof(byte); // ??????????? tf is this byte doing here?
+
+                    var alpha = Unsafe.Read<byte>(relPtr.ToPointer());
+                    relPtr += sizeof(byte);
+
+                    var offset = Unsafe.Read<uint>(relPtr.ToPointer());
+                    relPtr += sizeof(uint);
+
+                    var bitmap = ReadImage((nint)ptr, offset);
+
+                    var sourceArea = Unsafe.Read<SpiceRect>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceRect);
+
+                    SurfaceDrawAlphaBlend?.Invoke(this, new SurfaceDrawAlphaBlendArgs(bas, clipRects, sourceArea, alpha / 255f, bitmap));
+                }
+                break;
+            case Spice.SPICE_MSG_DISPLAY_COPY_BITS:
+                {
+                    var bas = Unsafe.Read<SpiceMsgDisplayBase>(relPtr.ToPointer());
+                    relPtr += sizeof(SpiceMsgDisplayBase);
+
+                    var clipRects = ReadClipRects(ref relPtr, bas);
+
+                    var srcPoint = Unsafe.Read<SpicePoint>(relPtr.ToPointer());
 
                     SurfaceCopyBits?.Invoke(this, new SurfaceCopyBitsArgs(bas, srcPoint, clipRects));
                 }
@@ -407,7 +262,7 @@ public class DisplayChannel : BaseChannel
                 break;
             case Spice.SPICE_MSG_DISPLAY_SURFACE_CREATE:
 
-                var surface = Marshal.PtrToStructure<SpiceSurface>(relPtr);
+                var surface = Unsafe.Read<SpiceSurface>(relPtr.ToPointer());
 
                 Debug.WriteLine($"Id: {surface.surface_id} Width: {surface.width} Height: {surface.height} Format: {surface.format} Flags: {surface.flags}");
 
@@ -468,6 +323,267 @@ public class DisplayChannel : BaseChannel
         }
     }
 
+    private unsafe SpiceImage ReadImage(nint ptr, uint offset, bool stripAlpha = false)
+    {
+        var outputImage = Array.Empty<byte>();
+        nint descriptorBase = (nint)(ptr + offset);
+        var imageDescriptor = Unsafe.Read<SpiceImageDescriptor>(descriptorBase.ToPointer());
+        descriptorBase += sizeof(SpiceImageDescriptor);
+
+        switch (imageDescriptor.type)
+        {
+            case SpiceImageType.SPICE_IMAGE_TYPE_BITMAP:
+                {
+                    var format = (SpiceBitmapFmt)Unsafe.Read<byte>(descriptorBase.ToPointer());
+                    descriptorBase += sizeof(byte);
+
+                    var flags = Unsafe.Read<byte>(descriptorBase.ToPointer());
+                    descriptorBase += sizeof(byte);
+
+                    var x = Unsafe.Read<uint>(descriptorBase.ToPointer());
+                    descriptorBase += sizeof(uint);
+
+                    var y = Unsafe.Read<uint>(descriptorBase.ToPointer());
+                    descriptorBase += sizeof(uint);
+
+                    var stride = Unsafe.Read<uint>(descriptorBase.ToPointer());
+                    descriptorBase += sizeof(uint);
+
+                    if ((flags & (1 << 1)) != 0)
+                    {
+                        // palette id long
+                        descriptorBase += sizeof(ulong);
+                    }
+
+                    //var offset = Unsafe.Read<uint>(descriptorBase.ToPointer());
+                    descriptorBase += sizeof(uint);
+
+                    /*if(offset != 0)
+                    {
+                        // unique
+                        descriptorBase += sizeof(ulong);
+                        var num_ents = Unsafe.Read<ushort>(descriptorBase.ToPointer());
+                        descriptorBase += sizeof(ushort);
+
+                        descriptorBase += sizeof(uint) * num_ents;
+                    }*/
+
+                    switch (format)
+                    {
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_INVALID:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_1BIT_LE:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_1BIT_BE:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_4BIT_LE:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_4BIT_BE:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_8BIT:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_16BIT:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_24BIT:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_32BIT:
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_RGBA:
+
+                            var pixels = x * y;
+                            var output = (byte*)NativeMemory.Alloc(pixels * 4);
+
+                            for (int i = 0; i < pixels * 4; i += 4)
+                            {
+                                output[i] = Unsafe.Read<byte>((descriptorBase + i).ToPointer());
+                                output[i + 1] = Unsafe.Read<byte>((descriptorBase + i + 1).ToPointer());
+                                output[i + 2] = Unsafe.Read<byte>((descriptorBase + i + 2).ToPointer());
+                                if (format == SpiceBitmapFmt.SPICE_BITMAP_FMT_RGBA && !stripAlpha)
+                                {
+                                    output[i + 3] = Unsafe.Read<byte>((descriptorBase + i + 3).ToPointer());
+
+                                    var alpha = output[i + 3] / 255f;
+                                    output[i] = (byte)(output[i] * alpha);
+                                    output[i + 1] = (byte)(output[i + 1] * alpha);
+                                    output[i + 2] = (byte)(output[i + 2] * alpha);
+                                }
+                                else
+                                {
+                                    output[i + 3] = 0xff;
+                                }
+                            }
+
+                            if ((flags & (1 << 2)) == 0)
+                            {
+                                var temp = (byte*)NativeMemory.Alloc(pixels * 4);
+                                for (int i = 0; i < y; i++)
+                                {
+                                    NativeMemory.Copy(output + i * stride, temp + (y - 1 - i) * stride, stride);
+                                }
+                                NativeMemory.Free(output);
+                                output = temp;
+                            }
+
+                            var span = new Span<byte>(output, (int)pixels * 4);
+
+                            outputImage = span.ToArray();
+
+                            NativeMemory.Free(output);
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_8BIT_A:
+                            break;
+                        case SpiceBitmapFmt.SPICE_BITMAP_FMT_ENUM_END:
+                            break;
+                    }
+
+                }
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_QUIC:
+                {
+                    var dataSize = Marshal.ReadInt32(descriptorBase);
+                    descriptorBase += sizeof(int);
+
+                    var usrContext = Quic.quic_create_usr_context();
+                    var decoder = Quic.quic_create(usrContext);
+
+                    var type = new QuicImageType();
+                    int width, height;
+                    var res = Quic.quic_decode_begin(decoder, (uint*)descriptorBase, (uint)dataSize, &type, &width, &height);
+
+                    var pixels = width * height;
+                    var target = type switch
+                    {
+                        QuicImageType.QUIC_IMAGE_TYPE_INVALID => throw new Exception(),
+                        QuicImageType.QUIC_IMAGE_TYPE_GRAY => QuicImageType.QUIC_IMAGE_TYPE_GRAY,
+                        QuicImageType.QUIC_IMAGE_TYPE_RGB16 => QuicImageType.QUIC_IMAGE_TYPE_RGB32,
+                        QuicImageType.QUIC_IMAGE_TYPE_RGB24 => QuicImageType.QUIC_IMAGE_TYPE_RGB32,
+                        QuicImageType.QUIC_IMAGE_TYPE_RGB32 => QuicImageType.QUIC_IMAGE_TYPE_RGB32,
+                        QuicImageType.QUIC_IMAGE_TYPE_RGBA => QuicImageType.QUIC_IMAGE_TYPE_RGBA,
+                        _ => throw new Exception(),
+                    };
+                    var output = (byte*)NativeMemory.Alloc((nuint)(width * height * 4));
+
+                    res = Quic.quic_decode(decoder, target, output, width * 4);
+
+                    var span = new Span<byte>(output, pixels * 4);
+
+                    for (int i = 0; i < pixels * 4; i += 4)
+                    {
+                        if (target == QuicImageType.QUIC_IMAGE_TYPE_RGBA && !stripAlpha)
+                        {
+                            var alpha = output[i + 3] / 255f;
+                            output[i] = (byte)(output[i] * alpha);
+                            output[i + 1] = (byte)(output[i + 1] * alpha);
+                            output[i + 2] = (byte)(output[i + 2] * alpha);
+                        }
+                        else
+                        {
+                            output[i + 3] = 0xff;
+                        }
+                    }
+
+                    outputImage = span.ToArray();
+
+                    Quic.quic_destroy(decoder);
+                    Quic.quic_destroy_usr_context(usrContext);
+                    NativeMemory.Free(output);
+                }
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_RESERVED:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_LZ_PLT:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_LZ_RGB:
+                {
+                    var dataSize = Marshal.ReadInt32(descriptorBase);
+                    descriptorBase += sizeof(int);
+
+                    var lzUsrContext = Lz.lz_create_usr_context();
+                    var lzDecoder = Lz.lz_create(lzUsrContext);
+
+                    var type = new LzImageType();
+                    int width, height, pixels, topDown;
+                    var palette = new SpicePalette();
+                    Lz.lz_decode_begin(lzDecoder, (byte*)descriptorBase, (uint)dataSize, &type, &width, &height, &pixels, &topDown, &palette);
+
+                    var target = type switch
+                    {
+                        LzImageType.LZ_IMAGE_TYPE_INVALID => throw new Exception(),
+                        LzImageType.LZ_IMAGE_TYPE_PLT1_LE => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_PLT1_BE => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_PLT4_LE => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_PLT4_BE => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_PLT8 => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_RGB16 => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_RGB24 => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_RGB32 => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        LzImageType.LZ_IMAGE_TYPE_RGBA => LzImageType.LZ_IMAGE_TYPE_RGBA,
+                        LzImageType.LZ_IMAGE_TYPE_XXXA => LzImageType.LZ_IMAGE_TYPE_XXXA,
+                        LzImageType.LZ_IMAGE_TYPE_A8 => LzImageType.LZ_IMAGE_TYPE_RGB32,
+                        _ => throw new Exception(),
+                    };
+                    var output = (byte*)NativeMemory.Alloc((nuint)(pixels * 4));
+
+                    Lz.lz_decode(lzDecoder, target, output);
+
+                    if (topDown == 0)
+                    {
+                        var temp = (byte*)NativeMemory.Alloc((nuint)(pixels * 4));
+                        var stride = width * 4;
+                        for (int i = 0; i < height; i++)
+                        {
+                            NativeMemory.Copy(output + i * stride, temp + (height - 1 - i) * stride, (nuint)stride);
+                        }
+                        NativeMemory.Free(output);
+                        output = temp;
+                    }
+
+                    var span = new Span<byte>(output, pixels * 4);
+
+                    for (int i = 0; i < pixels * 4; i += 4)
+                    {
+                        if (target == LzImageType.LZ_IMAGE_TYPE_RGBA && !stripAlpha)
+                        {
+                            var alpha = output[i + 3] / 255f;
+                            output[i] = (byte)(output[i] * alpha);
+                            output[i + 1] = (byte)(output[i + 1] * alpha);
+                            output[i + 2] = (byte)(output[i + 2] * alpha);
+                        }
+                        else
+                        {
+                            output[i + 3] = 0xff;
+                        }
+                    }
+
+                    outputImage = span.ToArray();
+
+                    Lz.lz_destroy(lzDecoder);
+                    Lz.lz_destroy_usr_context(lzUsrContext);
+                    NativeMemory.Free(output);
+                }
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_GLZ_RGB:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_SURFACE:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_JPEG:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE_LOSSLESS:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_ZLIB_GLZ_RGB:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_JPEG_ALPHA:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_LZ4:
+                break;
+            case SpiceImageType.SPICE_IMAGE_TYPE_ENUM_END:
+                break;
+        }
+
+        return new(imageDescriptor, outputImage);
+    }
+
     private static unsafe List<SpiceRect> ReadClipRects(ref nint relPtr, SpiceMsgDisplayBase @base)
     {
         List<SpiceRect> clipRects = new();
@@ -479,7 +595,7 @@ public class DisplayChannel : BaseChannel
 
             for (int i = 0; i < num_rects; i++)
             {
-                var rect = Marshal.PtrToStructure<SpiceRect>(relPtr + i * sizeof(SpiceRect));
+                var rect = Unsafe.Read<SpiceRect>((relPtr + i * sizeof(SpiceRect)).ToPointer());
                 clipRects.Add(rect);
             }
 
@@ -493,20 +609,16 @@ public class DisplayChannel : BaseChannel
 public sealed class SurfaceDrawCopyArgs : EventArgs
 {
     public SpiceMsgDisplayBase Display { get; }
-    public SpiceCopy Copy { get; }
-    public SpiceImageDescriptor ImageDescriptor { get; }
     public List<SpiceRect> ClipRects { get; }
-    public byte[] Image { get; }
-    public bool FlipY { get; }
+    public SpiceCopy Copy { get; }
+    public SpiceImage Bitmap { get; }
 
-    public SurfaceDrawCopyArgs(SpiceMsgDisplayBase display, SpiceCopy copy, SpiceImageDescriptor imageDescriptor, List<SpiceRect> clipRects, byte[] image, bool flipY)
+    public SurfaceDrawCopyArgs(SpiceMsgDisplayBase display, List<SpiceRect> clipRects, SpiceCopy copy, SpiceImage bitmap)
     {
         Display = display;
-        Copy = copy;
-        ImageDescriptor = imageDescriptor;
         ClipRects = clipRects;
-        Image = image;
-        FlipY = flipY;
+        Copy = copy;
+        Bitmap = bitmap;
     }
 }
 
@@ -528,17 +640,78 @@ public sealed class SurfaceDrawFillArgs : EventArgs
 {
     public SpiceMsgDisplayBase Display { get; }
     public SpiceBrushType Type { get; }
-    public uint Color { get; }
     public List<SpiceRect> ClipRects { get; }
+    public uint Color { get; }
+    public SpiceImage Pattern { get; } = null!;
+    public SpicePoint Position { get; }
 
-    public SurfaceDrawFillArgs(SpiceMsgDisplayBase display, SpiceBrushType type, uint color, List<SpiceRect> clipRects)
+    public SurfaceDrawFillArgs(SpiceMsgDisplayBase display, SpiceBrushType type, List<SpiceRect> clipRects, uint color)
     {
         Display = display;
         Type = type;
+        ClipRects = clipRects;
+        Color = color;
+    }
+
+    public SurfaceDrawFillArgs(SpiceMsgDisplayBase display, SpiceBrushType type, List<SpiceRect> clipRects, SpiceImage pattern, SpicePoint position)
+    {
+        Display = display;
+        Type = type;
+        ClipRects = clipRects;
+        Pattern = pattern;
+        Position = position;
+    }
+}
+
+public sealed class SurfaceDrawWBArgs : EventArgs
+{
+    public SpiceMsgDisplayBase Display { get; }
+    public uint Color { get; }
+    public List<SpiceRect> ClipRects { get; }
+
+    public SurfaceDrawWBArgs(SpiceMsgDisplayBase display, uint color, List<SpiceRect> clipRects)
+    {
+        Display = display;
         Color = color;
         ClipRects = clipRects;
     }
 }
+
+public sealed class SurfaceDrawAlphaBlendArgs : EventArgs
+{
+    public SpiceMsgDisplayBase Display { get; }
+    public List<SpiceRect> ClipRects { get; }
+    public SpiceRect Source { get; }
+    public SpiceImage Bitmap { get; }
+    public float Alpha { get; }
+
+    public SurfaceDrawAlphaBlendArgs(SpiceMsgDisplayBase display, List<SpiceRect> clipRects, SpiceRect source, float alpha, SpiceImage bitmap)
+    {
+        Display = display;
+        ClipRects = clipRects;
+        Source = source;
+        Alpha = alpha;
+        Bitmap = bitmap;
+    }
+}
+
+public sealed class SurfaceDrawTransparentArgs : EventArgs
+{
+    public SpiceMsgDisplayBase Display { get; }
+    public List<SpiceRect> ClipRects { get; }
+    public SpiceTransparent Transparent { get; }
+    public SpiceImage Bitmap { get; }
+
+    public SurfaceDrawTransparentArgs(SpiceMsgDisplayBase display, List<SpiceRect> clipRects, SpiceTransparent transparent, SpiceImage bitmap)
+    {
+        Display = display;
+        ClipRects = clipRects;
+        Transparent = transparent;
+        Bitmap = bitmap;
+    }
+}
+
+public record SpiceImage(SpiceImageDescriptor descriptor, byte[] image);
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SpiceMsgDisplayInit
@@ -555,14 +728,14 @@ public struct SpiceSurface
     public uint surface_id;
     public uint width;
     public uint height;
-    public uint format;
-    public uint flags;
+    public SpiceSurfaceFmt format;
+    public SpiceSurfaceFlags flags;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SpiceQMask
 {
-    public byte flags;
+    public SpiceMaskFlags flags;
     public SpicePoint pos;
     public uint offset;
 }
@@ -580,8 +753,8 @@ public struct SpiceCopy
 {
     public uint offset;
     public SpiceRect src_area;
-    public ushort rop_descriptor;
-    public byte scale_mode;
+    public SpiceRopd rop_descriptor;
+    public SpiceImageScaleMode scale_mode;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -595,28 +768,18 @@ public struct SpiceImageDescriptor
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct LzRgb
-{
-    public uint length;
-    public _magic_e__FixedBuffer magic;
-    public uint version;
-    public uint type;
-    public uint width;
-    public uint height;
-    public uint stride;
-    public uint top_down;
-
-    [InlineArray(4)]
-    public partial struct _magic_e__FixedBuffer
-    {
-        public char e0;
-    }
-}
-
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SpiceMsgDisplayMode
 {
     public uint width;
     public uint height;
     public uint depth;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SpiceTransparent
+{
+    public uint source_image;
+    public SpiceRect source_area;
+    public uint transparent_color;
+    public uint true_color;
 }
