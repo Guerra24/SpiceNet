@@ -1,4 +1,4 @@
-namespace SpiceNet;
+namespace SpiceNet.Protocol;
 
 public partial struct VDAgentFileXferStatusNotEnoughSpace
 {

@@ -1,11 +1,10 @@
-﻿using Microsoft.VisualBasic;
-using SpiceNet.Protocol;
+﻿using SpiceNet.Protocol;
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using static SpiceNet.VDAgentMonitorsConfig;
+using static SpiceNet.Protocol.VDAgentMonitorsConfig;
 
 namespace SpiceNet;
 
@@ -230,7 +229,7 @@ public class MainChannel : BaseChannel
                                 var clipboard = args.Clipboard ?? string.Empty;
 
                                 var offset = hasClipboardSelection ? 2 : 1;
-                                byte[] bytes = [..Encoding.UTF8.GetBytes(clipboard), 0];
+                                byte[] bytes = [.. Encoding.UTF8.GetBytes(clipboard), 0];
 
                                 Span<byte> req = stackalloc byte[offset * sizeof(uint) + bytes.Length];
 

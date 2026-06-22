@@ -1,4 +1,6 @@
-﻿namespace SpiceNet.UWP.Extensions;
+﻿using SpiceNet.Protocol;
+
+namespace SpiceNet.UWP.Extensions;
 
 public static class SpiceRectExtensions
 {

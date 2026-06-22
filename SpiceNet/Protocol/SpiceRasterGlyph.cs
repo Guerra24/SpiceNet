@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace SpiceNet;
+namespace SpiceNet.Protocol;
 
 public partial struct SpiceRasterGlyph
 {

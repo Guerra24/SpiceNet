@@ -1,4 +1,4 @@
-namespace SpiceNet;
+namespace SpiceNet.Protocol;
 
 public unsafe partial struct SpiceText
 {

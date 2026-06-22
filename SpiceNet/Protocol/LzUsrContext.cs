@@ -1,6 +1,6 @@
 using System;
 
-namespace SpiceNet;
+namespace SpiceNet.Protocol;
 
 public partial struct LzUsrContext
 {

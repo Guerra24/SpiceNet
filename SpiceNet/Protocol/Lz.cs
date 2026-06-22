@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SpiceNet;
+namespace SpiceNet.Protocol;
 
 public static unsafe partial class Lz
 {
