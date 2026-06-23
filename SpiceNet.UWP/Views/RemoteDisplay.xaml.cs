@@ -11,8 +11,9 @@ using SpiceNet.UWP.Models;
 using SpiceNet.UWP.ViewModels;
 using System.Collections.Concurrent;
 using System.Numerics;
-using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Channels;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Devices.Input;
 using Windows.Graphics.DirectX;
@@ -59,10 +60,15 @@ public sealed partial class RemoteDisplay : Page
 
     private DispatcherQueueTimer resizeDebouncer;
 
-    public RemoteDisplay(string address, int port)
+    public RemoteDisplay(string address, int port, string password, bool autoResizeGuest, bool autoResizeViewer, FitMode fitMode)
     {
         InitializeComponent();
-        Data = new(address, port);
+        Data = new(address, port, password)
+        {
+            AutoResizeGuest = autoResizeGuest,
+            AutoResizeViewer = autoResizeViewer,
+            FitMode = fitMode
+        };
         Data.FitModeChanged += (sender, e) => FitCanvas();
 
         applicationView = ApplicationView.GetForCurrentView();
@@ -74,6 +80,7 @@ public sealed partial class RemoteDisplay : Page
         var compositor = ElementCompositionPreview.GetElementVisual(RootCanvas).Compositor;
 
         cursorVisual = compositor.CreateSpriteVisual();
+        cursorVisual.IsHitTestVisible = false;
 
         ElementCompositionPreview.SetElementChildVisual(RootCanvas, cursorVisual);
 
@@ -108,13 +115,21 @@ public sealed partial class RemoteDisplay : Page
     private void RootCanvas_GotFocus(object sender, RoutedEventArgs e)
     {
         coreWindow.Dispatcher.AcceleratorKeyActivated += Dispatcher_AcceleratorKeyActivated;
-        Data.Channel?.NotifyClipboard();
+
+        var dataPackageView = Clipboard.GetContent();
+        if (dataPackageView.Contains(StandardDataFormats.Text))
+            Data.Channel?.NotifyClipboard(VDAgent.VD_AGENT_CLIPBOARD_UTF8_TEXT);
     }
 
     private void RootCanvas_LostFocus(object sender, RoutedEventArgs e)
     {
         coreWindow.Dispatcher.AcceleratorKeyActivated -= Dispatcher_AcceleratorKeyActivated;
-        // TODO: Reset held keys
+        // Reset key modifiers
+        if (Data.Channel?.Inputs?.Ready != true)
+            return;
+        Data.Channel.Inputs.KeyUp(VirtualKey.Control.ToScancode());
+        Data.Channel.Inputs.KeyUp(VirtualKey.Menu.ToScancode());
+        Data.Channel.Inputs.KeyUp(VirtualKey.Shift.ToScancode());
     }
 
     private void ApplicationView_Consolidated(ApplicationView sender, ApplicationViewConsolidatedEventArgs args)
@@ -584,7 +599,7 @@ public sealed partial class RemoteDisplay : Page
             if (bitmaps.Remove(id, out var bitmap))
                 bitmap.Dispose();
 
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, false, false);
+        //GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, false, false);
     }
 
     private void RootCanvas_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
@@ -601,10 +616,10 @@ public sealed partial class RemoteDisplay : Page
 
         switch (Data.FitMode)
         {
-            case FitMode.OneToOne:
+            case FitMode.Center:
                 zoomFactor = 1;
                 break;
-            case FitMode.FitToSize:
+            case FitMode.ScaleToFit:
                 zoomFactor = (float)Math.Min(ScrollViewer.ViewportWidth / RootCanvas.ActualWidth, ScrollViewer.ViewportHeight / RootCanvas.ActualHeight);
                 break;
         }
@@ -811,12 +826,8 @@ public sealed partial class RemoteDisplay : Page
         if (status.IsExtendedKey)
             scancode = 0xE0 | (scancode << 8);
 
-        switch (key)
-        {
-            case VirtualKey.Tab:
-                scancode = 15u;
-                break;
-        }
+        if (scancode == 0)
+            scancode = key.ToScancode();
 
         return scancode;
     }
@@ -942,13 +953,19 @@ public sealed partial class RemoteDisplay : Page
 
     private void Playback_Data(object? sender, PlaybackData e)
     {
-        var frame = new AudioFrame((uint)e.Data.Length * sizeof(short));
+        using var frame = new AudioFrame((uint)e.Data.Length * sizeof(short));
 
         using (var buffer = frame.LockBuffer(AudioBufferAccessMode.Write))
         using (var reference = buffer.CreateReference())
         {
             WindowsRuntimeMarshal.TryGetDataUnsafe(reference, out var dataInBytes, out var capacityInBytes);
-            Marshal.Copy(e.Data, 0, dataInBytes, e.Data.Length);
+            unsafe
+            {
+                fixed (short* bytes = e.Data)
+                {
+                    Unsafe.CopyBlock((void*)dataInBytes, bytes, capacityInBytes);
+                }
+            }
         }
 
         frame.RelativeTime = TimeSpan.FromMilliseconds(e.Time);
@@ -965,6 +982,7 @@ public sealed partial class RemoteDisplay : Page
 
     private void Playback_Stop(object? sender, EventArgs e)
     {
+        frameInputNode?.RemoveOutgoingConnection(deviceOutputNode);
         frameInputNode?.Stop();
         frameInputNode?.Dispose();
         frameInputNode = null;

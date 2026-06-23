@@ -1,0 +1,37 @@
+﻿<ContentDialog
+    x:Class="SpiceNet.UWP.Views.Dialogs.ServerProfileDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:global="using:Windows.Globalization.NumberFormatting"
+    IsPrimaryButtonEnabled="False"
+    Title="Connection"
+    PrimaryButtonText="Add"
+    CloseButtonText="Cancel"
+    Style="{StaticResource DefaultContentDialogStyle}"
+    PrimaryButtonStyle="{StaticResource AccentButtonStyle}"
+    mc:Ignorable="d">
+
+    <StackPanel Spacing="8">
+        <TextBox x:Name="ProfileName" PlaceholderText="Name" TextChanging="ProfileName_TextChanging" />
+        <TextBox x:Name="ProfileAddress" PlaceholderText="Address" TextChanging="ProfileServerAddress_TextChanging" />
+        <muxc:NumberBox x:Name="ProfilePort" PlaceholderText="Port" Minimum="1" Maximum="65535" Value="5900" ValidationMode="InvalidInputOverwritten" SpinButtonPlacementMode="Inline" ValueChanged="ProfilePort_ValueChanged">
+            <muxc:NumberBox.NumberFormatter>
+                <global:DecimalFormatter FractionDigits="0">
+                    <global:DecimalFormatter.NumberRounder>
+                        <global:IncrementNumberRounder Increment="1" RoundingAlgorithm="RoundHalfUp"/>
+                    </global:DecimalFormatter.NumberRounder>
+                </global:DecimalFormatter>
+            </muxc:NumberBox.NumberFormatter>
+        </muxc:NumberBox>
+        <PasswordBox x:Name="ProfilePassword" PlaceholderText="Password" />
+        <StackPanel Orientation="Horizontal">
+            <ToggleSwitch x:Name="ProfileAutoResizeGuest" Header="Auto resize guest" IsOn="True" />
+            <ToggleSwitch x:Name="ProfileAutoResizeViewer" Header="Auto resize viewer" IsOn="true" />
+        </StackPanel>
+        <ComboBox x:Name="ProfileFitMode" Header="Scaling" HorizontalAlignment="Stretch" />
+        <TextBlock x:Name="ProfileError" Foreground="#FF4141" IsTextSelectionEnabled="True" />
+    </StackPanel>
+</ContentDialog>

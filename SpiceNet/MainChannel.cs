@@ -35,7 +35,7 @@ public class MainChannel : BaseChannel
     public event EventHandler<string>? Name;
     public event EventHandler<Guid>? Guid;
 
-    public MainChannel(IPEndPoint endPoint) : base(endPoint)
+    public MainChannel(IPEndPoint endPoint, string password) : base(endPoint, password)
     {
         connectionId = 0;
         type = Spice.SPICE_CHANNEL_MAIN;
@@ -110,26 +110,26 @@ public class MainChannel : BaseChannel
                         case Spice.SPICE_CHANNEL_DISPLAY:
                             if (channel.id == 0)
                             {
-                                Display = new(endpoint, channel.id, connectionId);
+                                Display = new(endpoint, password, channel.id, connectionId);
                                 DisplayInit?.Invoke(this, Display);
                                 Display.Start();
                                 channels.Add(Display);
                             }
                             break;
                         case Spice.SPICE_CHANNEL_INPUTS:
-                            Inputs = new(endpoint, channel.id, connectionId);
+                            Inputs = new(endpoint, password, channel.id, connectionId);
                             InputsInit?.Invoke(this, Inputs);
                             Inputs.Start();
                             channels.Add(Inputs);
                             break;
                         case Spice.SPICE_CHANNEL_CURSOR:
-                            Cursor = new(endpoint, channel.id, connectionId);
+                            Cursor = new(endpoint, password, channel.id, connectionId);
                             CursorInit?.Invoke(this, Cursor);
                             Cursor.Start();
                             channels.Add(Cursor);
                             break;
                         case Spice.SPICE_CHANNEL_PLAYBACK:
-                            Playback = new(endpoint, channel.id, connectionId);
+                            Playback = new(endpoint, password, channel.id, connectionId);
                             PlaybackInit?.Invoke(this, Playback);
                             Playback.Start();
                             channels.Add(Playback);
@@ -410,7 +410,7 @@ public class MainChannel : BaseChannel
         agentTokens--;
     }
 
-    public void NotifyClipboard()
+    public void NotifyClipboard(uint content)
     {
         if (!agentConneted)
             return;
@@ -420,7 +420,7 @@ public class MainChannel : BaseChannel
 
         if (hasClipboardSelection)
             req[0] = 0;
-        req[^1] = VDAgent.VD_AGENT_CLIPBOARD_UTF8_TEXT;
+        req[^1] = content;
 
         var reply = new SpiceMsgcMainAgentData
         {

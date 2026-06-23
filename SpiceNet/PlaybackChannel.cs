@@ -12,7 +12,7 @@ public class PlaybackChannel : BaseChannel
     public event EventHandler<PlaybackData>? Data;
     public event EventHandler? StopPlayback;
 
-    public PlaybackChannel(IPEndPoint endPoint, byte channelId, uint connectionId) : base(endPoint)
+    public PlaybackChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;

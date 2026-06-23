@@ -22,7 +22,7 @@ public class DisplayChannel : BaseChannel
     public event EventHandler<SurfaceDrawTransparentArgs>? SurfaceDrawTransparent;
     public event EventHandler<List<ulong>>? SurfaceInvalidateList;
 
-    public DisplayChannel(IPEndPoint endpoint, byte channelId, uint connectionId) : base(endpoint)
+    public DisplayChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;
@@ -50,7 +50,7 @@ public class DisplayChannel : BaseChannel
         var data = new SpiceMsgDisplayInit
         {
             pixmap_cache_id = 1,
-            pixmap_cache_size = 10 * 1024 * 1024,
+            pixmap_cache_size = 30 * 1024 * 1024,
             glz_dictionary_id = 0,
             glz_dictionary_window_size = 0
         };

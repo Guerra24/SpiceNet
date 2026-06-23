@@ -29,33 +29,42 @@
         <Grid x:Name="Titlebar" Background="Transparent" />
         <muxc:MenuBar HorizontalAlignment="Left">
             <muxc:MenuBarItem Title="View">
-                <MenuFlyoutItem Text="Resize window" Click="{x:Bind ResizeToGuest}" />
+                <MenuFlyoutItem Text="Resize window to guest" Click="{x:Bind ResizeToGuest}" />
                 <ToggleMenuFlyoutItem IsChecked="{x:Bind Data.AutoResizeGuest, Mode=TwoWay}" Text="Auto resize guest" />
                 <ToggleMenuFlyoutItem IsChecked="{x:Bind Data.AutoResizeViewer, Mode=TwoWay}" Text="Auto resize viewer" />
                 <MenuFlyoutSeparator />
-                <muxc:RadioMenuFlyoutItem Text="1:1" IsChecked="{x:Bind Data.FitMode, Mode=OneWay, Converter={StaticResource FitModeConverter}, ConverterParameter=OneToOne}" Command="{x:Bind Data.ChangeFitModeCommand}" GroupName="FitMode">
+                <muxc:RadioMenuFlyoutItem Text="Center" IsChecked="{x:Bind Data.FitMode, Mode=OneWay, Converter={StaticResource FitModeConverter}, ConverterParameter=Center}" Command="{x:Bind Data.ChangeFitModeCommand}" GroupName="FitMode">
                     <muxc:RadioMenuFlyoutItem.CommandParameter>
                         <models:FitMode>
-                            OneToOne
+                            Center
                         </models:FitMode>
                     </muxc:RadioMenuFlyoutItem.CommandParameter>
                 </muxc:RadioMenuFlyoutItem>
-                <muxc:RadioMenuFlyoutItem Text="Scale" IsChecked="{x:Bind Data.FitMode, Mode=OneWay, Converter={StaticResource FitModeConverter}, ConverterParameter=FitToSize}" Command="{x:Bind Data.ChangeFitModeCommand}" GroupName="FitMode">
+                <muxc:RadioMenuFlyoutItem Text="Scale to fit" IsChecked="{x:Bind Data.FitMode, Mode=OneWay, Converter={StaticResource FitModeConverter}, ConverterParameter=ScaleToFit}" Command="{x:Bind Data.ChangeFitModeCommand}" GroupName="FitMode">
                     <muxc:RadioMenuFlyoutItem.CommandParameter>
                         <models:FitMode>
-                            FitToSize
+                            ScaleToFit
                         </models:FitMode>
                     </muxc:RadioMenuFlyoutItem.CommandParameter>
                 </muxc:RadioMenuFlyoutItem>
             </muxc:MenuBarItem>
             <muxc:MenuBarItem Title="VM">
-                <MenuFlyoutItem Text="Ctrl+Alt+Delete" />
-                <MenuFlyoutItem Text="Ctrl+Alt+Backspace" />
+                <MenuFlyoutItem Text="Ctrl+Alt+Delete" Command="{x:Bind Data.SendEmulatedKeypressCommand}">
+                    <MenuFlyoutItem.CommandParameter>
+                        <models:EmulatedKey Modifier="Control" Extra="Menu" Key="Delete" />
+                    </MenuFlyoutItem.CommandParameter>
+                </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Print" />
-                <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Ctrl+F1" />
-                <MenuFlyoutItem Text="Ctrl+?" />
+                <MenuFlyoutItem Text="Alt+Tab" Command="{x:Bind Data.SendEmulatedKeypressCommand}">
+                    <MenuFlyoutItem.CommandParameter>
+                        <models:EmulatedKey Modifier="Menu" Key="Tab" />
+                    </MenuFlyoutItem.CommandParameter>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Alt+F4" Command="{x:Bind Data.SendEmulatedKeypressCommand}">
+                    <MenuFlyoutItem.CommandParameter>
+                        <models:EmulatedKey Modifier="Menu" Key="F4" />
+                    </MenuFlyoutItem.CommandParameter>
+                </MenuFlyoutItem>
             </muxc:MenuBarItem>
         </muxc:MenuBar>
         <ScrollViewer x:Name="ScrollViewer"

@@ -13,7 +13,7 @@ public class InputsChannel : BaseChannel
     public event EventHandler<InputKeyModifiers>? Init;
     public event EventHandler<InputKeyModifiers>? KeyModifiersChanged;
 
-    public InputsChannel(IPEndPoint endPoint, byte channelId, uint connectionId) : base(endPoint)
+    public InputsChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;

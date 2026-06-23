@@ -2,5 +2,17 @@
 
 public enum FitMode
 {
-    OneToOne, FitToSize
+    Center, ScaleToFit
+}
+
+public enum AppTheme
+{
+    System, Dark, Light
+}
+
+public class EmulatedKey
+{
+    public VirtualKey Modifier { get; set; }
+    public VirtualKey Extra { get; set; }
+    public VirtualKey Key { get; set; }
 }

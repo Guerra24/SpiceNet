@@ -4,16 +4,116 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:local="using:SpiceNet.UWP.Views"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:local="using:SpiceNet.UWP.Views"
+    xmlns:items="using:SpiceNet.UWP.Models"
+    xmlns:services="using:SpiceNet.UWP.Services"
     muxc:BackdropMaterial.ApplyToRootOrPageBackground="True"
     mc:Ignorable="d">
 
     <Grid>
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" Width="300">
-            <TextBox PlaceholderText="Address" Text="{x:Bind Data.Address, Mode=TwoWay}" />
-            <muxc:NumberBox PlaceholderText="Port" Minimum="1" Maximum="65535" SpinButtonPlacementMode="Inline" Value="{x:Bind Data.Port, Mode=TwoWay}" />
-            <Button Content="Connect" Command="{x:Bind Data.OpenRemoteDisplayCommand}" HorizontalAlignment="Center" />
-        </StackPanel>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition />
+            <ColumnDefinition Width="32"/>
+            <ColumnDefinition />
+        </Grid.ColumnDefinitions>
+        <ScrollViewer x:Name="LeftScrollViewer" Margin="0,32,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel
+                Grid.Column="2"
+                Width="{x:Bind LeftScrollViewer.ViewportWidth, Mode=OneWay}"
+                MaxWidth="350" Padding="16,16,0,16" HorizontalAlignment="Right"
+                VerticalAlignment="Center" Spacing="8">
+                <TextBox PlaceholderText="Address" Text="{x:Bind Data.Address, Mode=TwoWay}" />
+                <muxc:NumberBox PlaceholderText="Port" Minimum="1" Maximum="65535" SpinButtonPlacementMode="Inline" Value="{x:Bind Data.Port, Mode=TwoWay}" />
+                <PasswordBox PlaceholderText="Password" />
+                <Button Content="Quick connect" Command="{x:Bind Data.QuickConnectCommand}" HorizontalAlignment="Center" />
+            </StackPanel>
+        </ScrollViewer>
+        <ScrollViewer x:Name="RightScrollViewer" Grid.Column="2" Margin="0,32,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel
+                Grid.Column="2"
+                Width="{x:Bind RightScrollViewer.ViewportWidth, Mode=OneWay}"
+                MaxWidth="500" Padding="0,16,16,16" HorizontalAlignment="Left"
+                VerticalAlignment="Center" Spacing="3">
+                <Button
+                    ToolTipService.ToolTip="Add connection"
+                    Padding="{StaticResource ExpanderHeaderPadding}"
+                    HorizontalAlignment="Stretch"
+                    Background="{ThemeResource ExpanderHeaderBackground}"
+                    BorderBrush="{ThemeResource ExpanderHeaderBorderBrush}"
+                    BorderThickness="{ThemeResource ExpanderHeaderBorderThickness}"
+                    Command="{x:Bind Data.AddProfileCommand}"
+                    CornerRadius="{ThemeResource ControlCornerRadius}">
+                    <FontIcon
+                        Margin="0,16" HorizontalAlignment="Center"
+                        FontFamily="{StaticResource SymbolThemeFontFamily}"
+                        Glyph="&#xE836;" />
+                </Button>
+                <muxc:ItemsRepeater ItemsSource="{x:Bind Data.Settings.Profiles, Mode=OneWay}">
+                    <muxc:ItemsRepeater.Layout>
+                        <muxc:StackLayout DisableVirtualization="True" Spacing="3" />
+                    </muxc:ItemsRepeater.Layout>
+                    <muxc:ItemsRepeater.ItemTemplate>
+                        <DataTemplate x:DataType="items:ServerProfile">
+                            <Button
+                                Padding="{StaticResource ExpanderHeaderPadding}"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Background="{ThemeResource ExpanderHeaderBackground}"
+                                BorderBrush="{ThemeResource ExpanderHeaderBorderBrush}"
+                                BorderThickness="{ThemeResource ExpanderHeaderBorderThickness}"
+                                Command="{x:Bind services:Service.MainPage.ContinueProfileCommand}"
+                                CommandParameter="{x:Bind}"
+                                CornerRadius="{ThemeResource ControlCornerRadius}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition />
+                                        <ColumnDefinition MaxWidth="400" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Margin="0,0,16,0" FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xE70C;" />
+                                    <StackPanel Grid.Column="1" Margin="0,16" VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" />
+                                        <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                                            <Run Text="{x:Bind Address, Mode=OneWay}" />:<Run Text="{x:Bind Port, Mode=OneWay}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <StackPanel
+                                        Grid.Column="2" Margin="0,0,16,0" HorizontalAlignment="Right"
+                                        Orientation="Horizontal" Spacing="16">
+                                        <Button
+                                            Grid.Column="2" Padding="6,8" Background="Transparent"
+                                            BorderBrush="Transparent">
+                                            <Button.Flyout>
+                                                <MenuFlyout Placement="Bottom">
+                                                    <MenuFlyoutItem
+                                                        Text="Edit"
+                                                        Command="{x:Bind services:Service.MainPage.EditProfileCommand}"
+                                                        CommandParameter="{x:Bind}"
+                                                        Icon="Edit" />
+                                                    <MenuFlyoutItem
+                                                        Text="Delete"
+                                                        Command="{x:Bind services:Service.MainPage.RemoveProfileCommand}"
+                                                        CommandParameter="{x:Bind}"
+                                                        Icon="Delete" />
+                                                </MenuFlyout>
+                                            </Button.Flyout>
+                                            <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" FontSize="16" Glyph="&#xE712;">
+                                                <FontIcon.RenderTransform>
+                                                    <RotateTransform Angle="90" CenterX="8" CenterY="8" />
+                                                </FontIcon.RenderTransform>
+                                            </FontIcon>
+                                        </Button>
+                                        <FontIcon
+                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            FontFamily="{StaticResource SymbolThemeFontFamily}"
+                                            FontSize="14" Glyph="&#xE8A7;" />
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </muxc:ItemsRepeater.ItemTemplate>
+                </muxc:ItemsRepeater>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Page>

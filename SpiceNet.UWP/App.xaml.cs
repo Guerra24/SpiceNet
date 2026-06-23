@@ -1,4 +1,5 @@
-﻿using SpiceNet.UWP.Views;
+﻿using SpiceNet.UWP.Services;
+using SpiceNet.UWP.Views;
 using Windows.ApplicationModel.Activation;
 using Windows.ApplicationModel.Core;
 using Windows.UI.ViewManagement;
@@ -11,7 +12,7 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
-
+        Service.BuildServices();
         Suspending += OnSuspending;
     }
 
@@ -40,11 +41,12 @@ public sealed partial class App : Application
         Window.Current.Activate();
     }
 
-    private void OnSuspending(object sender, SuspendingEventArgs e)
+    private async void OnSuspending(object sender, SuspendingEventArgs e)
     {
         var deferral = e.SuspendingOperation.GetDeferral();
 
-        // TODO: Save application state and stop any background activity
+        await Service.Settings.SaveProfiles();
+
         deferral.Complete();
     }
 }

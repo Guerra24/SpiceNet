@@ -18,6 +18,7 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
     private int ack_window = 0, msgs_until_ack = 0;
 
     protected IPEndPoint endpoint;
+    protected string password;
     protected byte type;
     protected byte channelId;
     protected uint connectionId;
@@ -30,9 +31,10 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
     public event EventHandler? OnDisconnected;
     public event EventHandler<Exception>? OnError;
 
-    public BaseChannel(IPEndPoint endPoint)
+    public BaseChannel(IPEndPoint endpoint, string password)
     {
-        this.endpoint = endPoint;
+        this.endpoint = endpoint;
+        this.password = password;
     }
 
     protected abstract int GetChannelCaps();
@@ -51,7 +53,10 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
 
     public void Start()
     {
-        thread = new(Loop);
+        thread = new(Loop)
+        {
+            Name = $"Channel-{type}-Connection-{connectionId}"
+        };
         thread.Start();
     }
 
@@ -60,131 +65,135 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
         // TODO: SPICE_MSGC_DISCONNECTING
     }
 
+    private void Connect()
+    {
+        client = new TcpClient(AddressFamily.InterNetwork)
+        {
+            NoDelay = true,
+            ReceiveBufferSize = 1048576,
+            SendBufferSize = 1048576
+        };
+        client.Connect(endpoint);
+        stream = client.GetStream();
+
+        unsafe
+        {
+            var hdr = new SpiceLinkHeader
+            {
+                magic = Spice.SPICE_MAGIC,
+                major_version = Spice.SPICE_VERSION_MAJOR,
+                minor_version = Spice.SPICE_VERSION_MINOR
+            };
+            var msg = new SpiceLinkMess
+            {
+                connection_id = connectionId,
+                channel_type = type,
+                channel_id = channelId,
+                num_common_caps = 1,
+                num_channel_caps = GetChannelCaps() != 0 ? 1u : 0u,
+                caps_offset = (uint)sizeof(SpiceLinkMess)
+            };
+
+            hdr.size = (uint)(sizeof(SpiceLinkMess) + sizeof(int) * (msg.num_common_caps + msg.num_channel_caps));
+
+            var ptr = NativeMemory.AllocZeroed((nuint)(sizeof(SpiceLinkHeader) + hdr.size));
+            Marshal.StructureToPtr(hdr, (nint)ptr, true);
+            Marshal.StructureToPtr(msg, (nint)ptr + sizeof(SpiceLinkHeader), true);
+
+            Marshal.WriteInt32((nint)((nint)ptr + sizeof(SpiceLinkHeader) + msg.caps_offset), (1 << Spice.SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION) | (1 << Spice.SPICE_COMMON_CAP_MINI_HEADER));
+
+            if (GetChannelCaps() != 0)
+                Marshal.WriteInt32((nint)((nint)ptr + sizeof(SpiceLinkHeader) + msg.caps_offset + sizeof(int)), GetChannelCaps());
+
+            var span = new Span<byte>(ptr, (int)(sizeof(SpiceLinkHeader) + hdr.size));
+            stream.Write(span);
+            NativeMemory.Free(ptr);
+        }
+
+        SpiceLinkReply linkReply;
+        unsafe
+        {
+            var ptr = NativeMemory.AllocZeroed((nuint)sizeof(SpiceLinkHeader));
+            var span = new Span<byte>(ptr, sizeof(SpiceLinkHeader));
+            stream.ReadExactly(span);
+
+            var reply = Marshal.PtrToStructure<SpiceLinkHeader>((nint)ptr);
+            NativeMemory.Free(ptr);
+
+            if (reply.magic != Spice.SPICE_MAGIC)
+                throw new Exception("Invalid Magic");
+
+            ptr = NativeMemory.AllocZeroed(reply.size);
+            span = new Span<byte>(ptr, (int)reply.size);
+            stream.ReadExactly(span);
+
+            linkReply = Unsafe.Read<SpiceLinkReply>(ptr);
+
+            var commonCaps = new List<int>();
+            for (int i = 0; i < linkReply.num_common_caps; i++)
+                commonCaps.Add(Marshal.ReadInt32((nint)ptr + sizeof(SpiceLinkReply) + i * sizeof(int)));
+
+            var channelCaps = new List<int>();
+            for (int i = 0; i < linkReply.num_channel_caps; i++)
+                channelCaps.Add(Marshal.ReadInt32((nint)((nint)ptr + sizeof(SpiceLinkReply) + linkReply.num_common_caps * sizeof(int) + i * sizeof(int))));
+
+            NativeMemory.Free(ptr);
+        }
+
+        using var rsa = RSA.Create();
+
+        rsa.ImportSubjectPublicKeyInfo(linkReply.pub_key, out var bytesRead);
+
+        var ticket = rsa.Encrypt(Encoding.UTF8.GetBytes($"{password}\0"), RSAEncryptionPadding.OaepSHA1);
+
+        unsafe
+        {
+            var auth = new SpiceLinkAuthMechanism
+            {
+                auth_mechanism = Spice.SPICE_COMMON_CAP_AUTH_SPICE
+            };
+            var data = new SpiceLinkEncryptedTicket();
+            ticket.CopyTo(data.encrypted_data);
+
+            var ptr = NativeMemory.AllocZeroed((nuint)(sizeof(SpiceLinkAuthMechanism) + sizeof(SpiceLinkEncryptedTicket)));
+
+            Marshal.StructureToPtr(auth, (nint)ptr, true);
+            Marshal.StructureToPtr(data, (nint)ptr + sizeof(SpiceLinkAuthMechanism), true);
+
+            var span = new Span<byte>(ptr, sizeof(SpiceLinkAuthMechanism) + sizeof(SpiceLinkEncryptedTicket));
+            stream.Write(span);
+            NativeMemory.Free(ptr);
+        }
+
+        unsafe
+        {
+            var ptr = NativeMemory.AllocZeroed(sizeof(uint));
+            var span = new Span<byte>(ptr, sizeof(uint));
+            stream.ReadExactly(span);
+
+            var reply = Unsafe.Read<SpiceLinkErr>(ptr);
+            NativeMemory.Free(ptr);
+
+            if (reply != SpiceLinkErr.SPICE_LINK_ERR_OK)
+                throw new Exception(reply.ToString());
+        }
+
+    }
+
     private unsafe void Loop()
     {
         try
         {
-            client = new TcpClient(AddressFamily.InterNetwork)
-            {
-                NoDelay = true,
-                ReceiveBufferSize = 1048576,
-                SendBufferSize = 1048576
-            };
-            client.Connect(endpoint);
-            stream = client.GetStream();
-
-            unsafe
-            {
-                var hdr = new SpiceLinkHeader
-                {
-                    magic = Spice.SPICE_MAGIC,
-                    major_version = Spice.SPICE_VERSION_MAJOR,
-                    minor_version = Spice.SPICE_VERSION_MINOR
-                };
-                var msg = new SpiceLinkMess
-                {
-                    connection_id = connectionId,
-                    channel_type = type,
-                    channel_id = channelId,
-                    num_common_caps = 1,
-                    num_channel_caps = GetChannelCaps() != 0 ? 1u : 0u,
-                    caps_offset = (uint)sizeof(SpiceLinkMess)
-                };
-
-                hdr.size = (uint)(sizeof(SpiceLinkMess) + sizeof(int) * (msg.num_common_caps + msg.num_channel_caps));
-
-                var ptr = NativeMemory.AllocZeroed((nuint)(sizeof(SpiceLinkHeader) + hdr.size));
-                Marshal.StructureToPtr(hdr, (nint)ptr, true);
-                Marshal.StructureToPtr(msg, (nint)ptr + sizeof(SpiceLinkHeader), true);
-
-                Marshal.WriteInt32((nint)((nint)ptr + sizeof(SpiceLinkHeader) + msg.caps_offset), (1 << Spice.SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION) | (1 << Spice.SPICE_COMMON_CAP_MINI_HEADER));
-
-                if (GetChannelCaps() != 0)
-                    Marshal.WriteInt32((nint)((nint)ptr + sizeof(SpiceLinkHeader) + msg.caps_offset + sizeof(int)), GetChannelCaps());
-
-                var span = new Span<byte>(ptr, (int)(sizeof(SpiceLinkHeader) + hdr.size));
-                stream.Write(span);
-                NativeMemory.Free(ptr);
-            }
-
-            SpiceLinkReply linkReply;
-            unsafe
-            {
-                var ptr = NativeMemory.AllocZeroed((nuint)sizeof(SpiceLinkHeader));
-                var span = new Span<byte>(ptr, sizeof(SpiceLinkHeader));
-                stream.ReadExactly(span);
-
-                var reply = Marshal.PtrToStructure<SpiceLinkHeader>((nint)ptr);
-                NativeMemory.Free(ptr);
-
-                if (reply.magic != Spice.SPICE_MAGIC)
-                    return;
-
-                ptr = NativeMemory.AllocZeroed(reply.size);
-                span = new Span<byte>(ptr, (int)reply.size);
-                stream.ReadExactly(span);
-
-                linkReply = Marshal.PtrToStructure<SpiceLinkReply>((nint)ptr);
-
-                var commonCaps = new List<int>();
-                for (int i = 0; i < linkReply.num_common_caps; i++)
-                    commonCaps.Add(Marshal.ReadInt32((nint)ptr + sizeof(SpiceLinkReply) + i * sizeof(int)));
-
-                var channelCaps = new List<int>();
-                for (int i = 0; i < linkReply.num_channel_caps; i++)
-                    channelCaps.Add(Marshal.ReadInt32((nint)((nint)ptr + sizeof(SpiceLinkReply) + linkReply.num_common_caps * sizeof(int) + i * sizeof(int))));
-
-                NativeMemory.Free(ptr);
-            }
-
-            using var rsa = RSA.Create();
-
-            rsa.ImportSubjectPublicKeyInfo(linkReply.pub_key, out var bytesRead);
-
-            var password = "\0"u8.ToArray();
-            var ticket = rsa.Encrypt(password, RSAEncryptionPadding.OaepSHA1);
-
-            unsafe
-            {
-                var auth = new SpiceLinkAuthMechanism
-                {
-                    auth_mechanism = Spice.SPICE_COMMON_CAP_AUTH_SPICE
-                };
-                var data = new SpiceLinkEncryptedTicket();
-                ticket.CopyTo(data.encrypted_data);
-
-                var ptr = NativeMemory.AllocZeroed((nuint)(sizeof(SpiceLinkAuthMechanism) + sizeof(SpiceLinkEncryptedTicket)));
-
-                Marshal.StructureToPtr(auth, (nint)ptr, true);
-                Marshal.StructureToPtr(data, (nint)ptr + sizeof(SpiceLinkAuthMechanism), true);
-
-                var span = new Span<byte>(ptr, sizeof(SpiceLinkAuthMechanism) + sizeof(SpiceLinkEncryptedTicket));
-                stream.Write(span);
-                NativeMemory.Free(ptr);
-            }
-
-            unsafe
-            {
-                var ptr = NativeMemory.AllocZeroed(sizeof(int));
-                var span = new Span<byte>(ptr, sizeof(int));
-                stream.ReadExactly(span);
-
-                var reply = (SpiceLinkErr)Marshal.ReadInt32((nint)ptr);
-                NativeMemory.Free(ptr);
-
-                if (reply != SpiceLinkErr.SPICE_LINK_ERR_OK)
-                    return;
-            }
-
+            Connect();
             Connected();
 
-            while (client.Connected)
+            while (client!.Connected)
             {
                 var ptr = NativeMemory.AllocZeroed((nuint)sizeof(SpiceMiniDataHeader));
                 try
                 {
                     var span = new Span<byte>(ptr, sizeof(SpiceMiniDataHeader));
-                    stream.ReadExactly(span);
+                    stream!.ReadExactly(span);
 
                     var hdr = Unsafe.Read<SpiceMiniDataHeader>(ptr);
 
@@ -218,16 +227,13 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
             var data = new Span<byte>(ptr, (int)hdr.size);
             stream!.ReadExactly(data);
 
-            var handled = false;
             switch (hdr.type)
             {
                 case Spice.SPICE_MSG_SET_ACK:
                     ReplyMsgSetAck(data, ptr);
-                    handled = true;
                     break;
                 case Spice.SPICE_MSG_PING:
                     ReplyMsgPing(data);
-                    handled = true;
                     break;
                 case Spice.SPICE_MSG_NOTIFY:
                     {
@@ -236,15 +242,13 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
                         var message = Encoding.UTF8.GetString((byte*)((nint)ptr + sizeof(SpiceMsgNotify)), (int)notify.message_len);
                         Debug.WriteLine($"{notify.time_stamp} {notify.severity} {notify.visibility} {notify.what} {message}");
                     }
-                    handled = true;
                     break;
                 case Spice.SPICE_MSG_DISCONNECTING:
-                    handled = true;
+                    break;
+                default:
+                    ProcessMessage(hdr, data, ptr);
                     break;
             }
-
-            if (!handled)
-                ProcessMessage(hdr, data, ptr);
 
             if (msgs_until_ack > 0)
             {

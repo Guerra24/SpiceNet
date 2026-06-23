@@ -13,7 +13,7 @@ public class CursorChannel : BaseChannel
     public event EventHandler? InvalidateAll;
     public event EventHandler? Hide;
 
-    public CursorChannel(IPEndPoint endPoint, byte channelId, uint connectionId) : base(endPoint)
+    public CursorChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;

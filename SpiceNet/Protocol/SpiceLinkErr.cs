@@ -1,6 +1,6 @@
 namespace SpiceNet.Protocol;
 
-public enum SpiceLinkErr
+public enum SpiceLinkErr : uint
 {
     SPICE_LINK_ERR_OK,
     SPICE_LINK_ERR_ERROR,
