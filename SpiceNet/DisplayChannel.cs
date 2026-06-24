@@ -85,7 +85,7 @@ public class DisplayChannel : BaseChannel
                     var copy = Unsafe.Read<SpiceCopy>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceCopy);
 
-                    var bitmap = ReadImage((nint)ptr, copy.offset, true);
+                    var bitmap = ReadImage((nint)ptr, copy.offset);
 
                     var qmask = Unsafe.Read<SpiceQMask>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceQMask);
@@ -231,7 +231,7 @@ public class DisplayChannel : BaseChannel
                     var offset = Unsafe.Read<uint>(relPtr.ToPointer());
                     relPtr += sizeof(uint);
 
-                    var bitmap = ReadImage((nint)ptr, offset);
+                    var bitmap = ReadImage((nint)ptr, offset, false);
 
                     var sourceArea = Unsafe.Read<SpiceRect>(relPtr.ToPointer());
                     relPtr += sizeof(SpiceRect);
@@ -323,7 +323,7 @@ public class DisplayChannel : BaseChannel
         }
     }
 
-    private unsafe SpiceImage ReadImage(nint ptr, uint offset, bool stripAlpha = false)
+    private unsafe SpiceImage ReadImage(nint ptr, uint offset, bool stripAlpha = true)
     {
         var outputImage = Array.Empty<byte>();
         nint descriptorBase = (nint)(ptr + offset);
@@ -466,20 +466,9 @@ public class DisplayChannel : BaseChannel
 
                     var span = new Span<byte>(output, pixels * 4);
 
-                    for (int i = 0; i < pixels * 4; i += 4)
-                    {
-                        if (target == QuicImageType.QUIC_IMAGE_TYPE_RGBA && !stripAlpha)
-                        {
-                            var alpha = output[i + 3] / 255f;
-                            output[i] = (byte)(output[i] * alpha);
-                            output[i + 1] = (byte)(output[i + 1] * alpha);
-                            output[i + 2] = (byte)(output[i + 2] * alpha);
-                        }
-                        else
-                        {
+                    if (target != QuicImageType.QUIC_IMAGE_TYPE_RGBA || stripAlpha)
+                        for (int i = 0; i < pixels * 4; i += 4)
                             output[i + 3] = 0xff;
-                        }
-                    }
 
                     outputImage = span.ToArray();
 
@@ -539,20 +528,9 @@ public class DisplayChannel : BaseChannel
 
                     var span = new Span<byte>(output, pixels * 4);
 
-                    for (int i = 0; i < pixels * 4; i += 4)
-                    {
-                        if (target == LzImageType.LZ_IMAGE_TYPE_RGBA && !stripAlpha)
-                        {
-                            var alpha = output[i + 3] / 255f;
-                            output[i] = (byte)(output[i] * alpha);
-                            output[i + 1] = (byte)(output[i + 1] * alpha);
-                            output[i + 2] = (byte)(output[i + 2] * alpha);
-                        }
-                        else
-                        {
+                    if (target != LzImageType.LZ_IMAGE_TYPE_RGBA || stripAlpha)
+                        for (int i = 0; i < pixels * 4; i += 4)
                             output[i + 3] = 0xff;
-                        }
-                    }
 
                     outputImage = span.ToArray();
 

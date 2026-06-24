@@ -13,7 +13,6 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.WindowsRuntime;
-using System.Threading.Channels;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Devices.Input;
 using Windows.Graphics.DirectX;
@@ -322,7 +321,6 @@ public sealed partial class RemoteDisplay : Page
 
             var rect = e.Display.box.ToRect();
 
-            using var ds = surface.CreateDrawingSession();
             if (e.ClipRects.Count > 0)
             {
                 var layers = new CanvasGeometry[e.ClipRects.Count];
@@ -334,14 +332,21 @@ public sealed partial class RemoteDisplay : Page
                 }
 
                 using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var ds = surface.CreateDrawingSession();
                 using var layer = ds.CreateLayer(1.0f, group);
                 ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
             }
             else
             {
+                using var ds = surface.CreateDrawingSession();
                 ds.DrawImage(bitmap, rect, e.Copy.src_area.ToRect());
             }
-            //ds.DrawRectangle(rect, Colors.Red);
+
+            if (!e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME) &&
+                !e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_REPLACE_ME) &&
+                e.Bitmap.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE &&
+                e.Bitmap.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE_LOSSLESS)
+                bitmap.Dispose();
         }
     }
 
@@ -355,7 +360,6 @@ public sealed partial class RemoteDisplay : Page
 
             bitmap.CopyPixelsFromBitmap(surface, 0, 0, e.Point.x, e.Point.y, (int)rect.Width, (int)rect.Height);
 
-            using var ds = surface.CreateDrawingSession();
             if (e.ClipRects.Count > 0)
             {
                 var layers = new CanvasGeometry[e.ClipRects.Count];
@@ -367,14 +371,15 @@ public sealed partial class RemoteDisplay : Page
                 }
 
                 using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var ds = surface.CreateDrawingSession();
                 using var layer = ds.CreateLayer(1.0f, group);
                 ds.DrawImage(bitmap, rect, bitmap.Bounds);
             }
             else
             {
+                using var ds = surface.CreateDrawingSession();
                 ds.DrawImage(bitmap, rect, bitmap.Bounds);
             }
-            //ds.DrawRectangle(rect, Colors.Red);
         }
     }
 
@@ -382,7 +387,6 @@ public sealed partial class RemoteDisplay : Page
     {
         if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
-            using var ds = surface.CreateDrawingSession();
             switch (e.Type)
             {
                 case SpiceBrushType.SPICE_BRUSH_TYPE_SOLID:
@@ -401,14 +405,15 @@ public sealed partial class RemoteDisplay : Page
                             }
 
                             using var group = CanvasGeometry.CreateGroup(surface, layers);
+                            using var ds = surface.CreateDrawingSession();
                             using var layer = ds.CreateLayer(1.0f, group);
                             ds.FillRectangle(rect, color);
                         }
                         else
                         {
+                            using var ds = surface.CreateDrawingSession();
                             ds.FillRectangle(rect, color);
                         }
-                        //ds.DrawRectangle(rect, Colors.Red);
                     }
                     break;
                 case SpiceBrushType.SPICE_BRUSH_TYPE_PATTERN:
@@ -447,14 +452,21 @@ public sealed partial class RemoteDisplay : Page
                             }
 
                             using var group = CanvasGeometry.CreateGroup(surface, layers);
+                            using var ds = surface.CreateDrawingSession();
                             using var layer = ds.CreateLayer(1.0f, group);
                             ds.FillRectangle(rect, brush);
                         }
                         else
                         {
+                            using var ds = surface.CreateDrawingSession();
                             ds.FillRectangle(rect, brush);
                         }
-                        //ds.DrawRectangle(rect, Colors.Red);
+
+                        if (!e.Pattern.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME) &&
+                            !e.Pattern.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_REPLACE_ME) &&
+                            e.Pattern.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE &&
+                            e.Pattern.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE_LOSSLESS)
+                            bitmap.Dispose();
                     }
                     break;
             }
@@ -465,7 +477,6 @@ public sealed partial class RemoteDisplay : Page
     {
         if (surfaces.TryGetValue(e.Display.surface_id, out var surface))
         {
-            using var ds = surface.CreateDrawingSession();
             var rawColor = e.Color & 0xffffff;
             var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
             var rect = e.Display.box.ToRect();
@@ -480,14 +491,15 @@ public sealed partial class RemoteDisplay : Page
                 }
 
                 using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var ds = surface.CreateDrawingSession();
                 using var layer = ds.CreateLayer(1.0f, group);
                 ds.FillRectangle(rect, color);
             }
             else
             {
+                using var ds = surface.CreateDrawingSession();
                 ds.FillRectangle(rect, color);
             }
-            //ds.DrawRectangle(rect, Colors.Red);
         }
     }
 
@@ -513,7 +525,6 @@ public sealed partial class RemoteDisplay : Page
 
             var rect = e.Display.box.ToRect();
 
-            using var ds = surface.CreateDrawingSession();
             if (e.ClipRects.Count > 0)
             {
                 var layers = new CanvasGeometry[e.ClipRects.Count];
@@ -525,15 +536,22 @@ public sealed partial class RemoteDisplay : Page
                 }
 
                 using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var ds = surface.CreateDrawingSession();
                 using var layer = ds.CreateLayer(e.Alpha, group);
                 ds.DrawImage(bitmap, rect, e.Source.ToRect());
             }
             else
             {
+                using var ds = surface.CreateDrawingSession();
                 using var layer = ds.CreateLayer(e.Alpha);
                 ds.DrawImage(bitmap, rect, e.Source.ToRect());
             }
-            //ds.DrawRectangle(rect, Colors.Red);
+
+            if (!e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME) &&
+                !e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_REPLACE_ME) &&
+                e.Bitmap.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE &&
+                e.Bitmap.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE_LOSSLESS)
+                bitmap.Dispose();
         }
     }
 
@@ -559,7 +577,6 @@ public sealed partial class RemoteDisplay : Page
 
             var rect = e.Display.box.ToRect();
 
-            using var ds = surface.CreateDrawingSession();
 
             var rawColor = e.Transparent.transparent_color & 0xffffff;
             var color = Color.FromArgb(0xff, (byte)(rawColor >> 16), (byte)((rawColor >> 8) & 0xff), (byte)(rawColor & 0xff));
@@ -582,14 +599,21 @@ public sealed partial class RemoteDisplay : Page
                 }
 
                 using var group = CanvasGeometry.CreateGroup(surface, layers);
+                using var ds = surface.CreateDrawingSession();
                 using var layer = ds.CreateLayer(1.0f, group);
                 ds.DrawImage(key, rect, e.Transparent.source_area.ToRect());
             }
             else
             {
+                using var ds = surface.CreateDrawingSession();
                 ds.DrawImage(key, rect, e.Transparent.source_area.ToRect());
             }
-            //ds.DrawRectangle(rect, Colors.Red);
+
+            if (!e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_ME) &&
+                !e.Bitmap.descriptor.flags.HasFlag(SpiceImageFlags.SPICE_IMAGE_FLAGS_CACHE_REPLACE_ME) &&
+                e.Bitmap.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE &&
+                e.Bitmap.descriptor.type != SpiceImageType.SPICE_IMAGE_TYPE_FROM_CACHE_LOSSLESS)
+                bitmap.Dispose();
         }
     }
 
@@ -851,7 +875,6 @@ public sealed partial class RemoteDisplay : Page
         if (!e.Visible)
             return;
 
-        using var ds = CanvasComposition.CreateDrawingSession(cursorSurface);
         CanvasBitmap bitmap;
 
         if (cursors.TryGetValue(e.Header.unique, out var set))
@@ -868,17 +891,24 @@ public sealed partial class RemoteDisplay : Page
             if (e.Image.Length == 0)
                 return;
 
-            bitmap = CanvasBitmap.CreateFromBytes(ds, e.Image, e.Header.width, e.Header.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
+            bitmap = CanvasBitmap.CreateFromBytes(canvasDevice, e.Image, e.Header.width, e.Header.height, DirectXPixelFormat.B8G8R8A8UIntNormalized);
 
             var anchorPoint = new Vector2(e.Header.hot_spot_x / cursorVisual.Size.X, e.Header.hot_spot_y / cursorVisual.Size.Y);
 
             cursorVisual.AnchorPoint = anchorPoint;
 
-            cursors.Add(e.Header.unique, (bitmap, anchorPoint));
+            if (e.Flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_CACHE_ME))
+                cursors.Add(e.Header.unique, (bitmap, anchorPoint));
         }
 
-        ds.Clear(Colors.Transparent);
-        ds.DrawImage(bitmap);
+        using (var ds = CanvasComposition.CreateDrawingSession(cursorSurface))
+        {
+            ds.Clear(Colors.Transparent);
+            ds.DrawImage(bitmap);
+        }
+
+        if (!e.Flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_FROM_CACHE) && !e.Flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_CACHE_ME))
+            bitmap.Dispose();
     }
 
     private void Cursor_InvalidateOne(object? sender, ulong e)

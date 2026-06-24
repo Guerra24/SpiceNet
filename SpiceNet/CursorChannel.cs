@@ -83,12 +83,13 @@ public class CursorChannel : BaseChannel
         var flags = Unsafe.Read<SpiceCursorFlags>(relPtr.ToPointer());
         relPtr += sizeof(SpiceCursorFlags);
 
-        if (flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_NONE))
+        if (flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_FROM_CACHE))
         {
-            // do nothing?
-            Hide?.Invoke(this, new EventArgs());
+            var unique = Unsafe.Read<ulong>(relPtr.ToPointer());
+
+            Set?.Invoke(this, new CursorSet(new SpiceCursorHeader { unique = unique }, flags, visible == 1, outputImage));
         }
-        if (flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_CACHE_ME))
+        else if (!flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_NONE))
         {
             var header = Unsafe.Read<SpiceCursorHeader>(relPtr.ToPointer());
             relPtr += sizeof(SpiceCursorHeader);
@@ -137,13 +138,7 @@ public class CursorChannel : BaseChannel
                     break;
             }
 
-            Set?.Invoke(this, new CursorSet(header, visible == 1, outputImage));
-        }
-        if (flags.HasFlag(SpiceCursorFlags.SPICE_CURSOR_FLAGS_FROM_CACHE))
-        {
-            var unique = Unsafe.Read<ulong>(relPtr.ToPointer());
-
-            Set?.Invoke(this, new CursorSet(new SpiceCursorHeader { unique = unique }, visible == 1, outputImage));
+            Set?.Invoke(this, new CursorSet(header, flags, visible == 1, outputImage));
         }
     }
 }
@@ -151,12 +146,14 @@ public class CursorChannel : BaseChannel
 public sealed class CursorSet : EventArgs
 {
     public SpiceCursorHeader Header { get; }
+    public SpiceCursorFlags Flags { get; }
     public bool Visible { get; }
     public byte[] Image { get; }
 
-    public CursorSet(SpiceCursorHeader header, bool visible, byte[] image)
+    public CursorSet(SpiceCursorHeader header, SpiceCursorFlags flags, bool visible, byte[] image)
     {
         Header = header;
+        Flags = flags;
         Visible = visible;
         Image = image;
     }
