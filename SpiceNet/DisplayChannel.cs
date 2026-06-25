@@ -1,6 +1,5 @@
 ﻿using SpiceNet.Protocol;
 using System.Diagnostics;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -22,7 +21,7 @@ public class DisplayChannel : BaseChannel
     public event EventHandler<SurfaceDrawTransparentArgs>? SurfaceDrawTransparent;
     public event EventHandler<List<ulong>>? SurfaceInvalidateList;
 
-    public DisplayChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
+    public DisplayChannel(string host, int port, string password, byte channelId, uint connectionId) : base(host, port, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;

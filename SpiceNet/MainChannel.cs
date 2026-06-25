@@ -1,6 +1,5 @@
 ﻿using SpiceNet.Protocol;
 using System.Diagnostics;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -35,7 +34,7 @@ public class MainChannel : BaseChannel
     public event EventHandler<string>? Name;
     public event EventHandler<Guid>? Guid;
 
-    public MainChannel(IPEndPoint endPoint, string password) : base(endPoint, password)
+    public MainChannel(string host, int port, string password) : base(host, port, password)
     {
         connectionId = 0;
         type = Spice.SPICE_CHANNEL_MAIN;
@@ -110,26 +109,42 @@ public class MainChannel : BaseChannel
                         case Spice.SPICE_CHANNEL_DISPLAY:
                             if (channel.id == 0)
                             {
-                                Display = new(endpoint, password, channel.id, connectionId);
+                                Display = new(host, port, password, channel.id, connectionId)
+                                {
+                                    Proxy = Proxy,
+                                    CA = CA
+                                };
                                 DisplayInit?.Invoke(this, Display);
                                 Display.Start();
                                 channels.Add(Display);
                             }
                             break;
                         case Spice.SPICE_CHANNEL_INPUTS:
-                            Inputs = new(endpoint, password, channel.id, connectionId);
+                            Inputs = new(host, port, password, channel.id, connectionId)
+                            {
+                                Proxy = Proxy,
+                                CA = CA
+                            };
                             InputsInit?.Invoke(this, Inputs);
                             Inputs.Start();
                             channels.Add(Inputs);
                             break;
                         case Spice.SPICE_CHANNEL_CURSOR:
-                            Cursor = new(endpoint, password, channel.id, connectionId);
+                            Cursor = new(host, port, password, channel.id, connectionId)
+                            {
+                                Proxy = Proxy,
+                                CA = CA
+                            };
                             CursorInit?.Invoke(this, Cursor);
                             Cursor.Start();
                             channels.Add(Cursor);
                             break;
                         case Spice.SPICE_CHANNEL_PLAYBACK:
-                            Playback = new(endpoint, password, channel.id, connectionId);
+                            Playback = new(host, port, password, channel.id, connectionId)
+                            {
+                                Proxy = Proxy,
+                                CA = CA
+                            };
                             PlaybackInit?.Invoke(this, Playback);
                             Playback.Start();
                             channels.Add(Playback);

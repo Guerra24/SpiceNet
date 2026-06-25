@@ -59,10 +59,10 @@ public sealed partial class RemoteDisplay : Page
 
     private DispatcherQueueTimer resizeDebouncer;
 
-    public RemoteDisplay(string address, int port, string password, bool autoResizeGuest, bool autoResizeViewer, FitMode fitMode)
+    public RemoteDisplay(string host, int port, string password, bool autoResizeGuest, bool autoResizeViewer, FitMode fitMode, string? proxy = null, string? ca = null)
     {
         InitializeComponent();
-        Data = new(address, port, password)
+        Data = new(host, port, password, proxy, ca)
         {
             AutoResizeGuest = autoResizeGuest,
             AutoResizeViewer = autoResizeViewer,
@@ -133,7 +133,8 @@ public sealed partial class RemoteDisplay : Page
 
     private void ApplicationView_Consolidated(ApplicationView sender, ApplicationViewConsolidatedEventArgs args)
     {
-        Data.Channel?.Dispose();
+        Data.Channel?.Stop();
+
         foreach (var surface in surfaces)
             surface.Value.Dispose();
         foreach (var bitmap in bitmaps)
@@ -148,6 +149,7 @@ public sealed partial class RemoteDisplay : Page
         graph.Stop();
         graph.Dispose();
         RootCanvas.RemoveFromVisualTree();
+        Data.Channel?.Dispose();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, true, false);
     }
 
@@ -688,6 +690,9 @@ public sealed partial class RemoteDisplay : Page
 
             return (scrollLock, numLock, capsLock);
         }, DispatcherQueuePriority.High);
+
+        if (Data.Channel?.Inputs?.Ready != true)
+            return;
 
         if (states.scrollLock != e.ScrollLock)
         {

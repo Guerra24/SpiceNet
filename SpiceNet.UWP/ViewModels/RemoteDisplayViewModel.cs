@@ -2,7 +2,6 @@
 using CommunityToolkit.Mvvm.Input;
 using SpiceNet.UWP.Extensions;
 using SpiceNet.UWP.Models;
-using System.Net;
 
 namespace SpiceNet.UWP.ViewModels;
 
@@ -32,13 +31,16 @@ public partial class RemoteDisplayViewModel : ObservableObject
 
     public event EventHandler? FitModeChanged;
 
-    public RemoteDisplayViewModel(string address, int port, string password)
+    public RemoteDisplayViewModel(string host, int port, string password, string? proxy, string? ca)
     {
         dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         try
         {
-            var host = Dns.GetHostEntry(address);
-            Channel = new MainChannel(new IPEndPoint(host.AddressList[0], port), password);
+            Channel = new MainChannel(host, port, password)
+            {
+                Proxy = proxy,
+                CA = ca
+            };
             Channel.OnDisconnected += Channel_OnDisconnected;
             Channel.OnError += Channel_OnError;
             Channel.Name += GuestName;

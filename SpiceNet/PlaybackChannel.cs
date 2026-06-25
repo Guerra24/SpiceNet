@@ -1,5 +1,4 @@
 ﻿using SpiceNet.Protocol;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -12,7 +11,7 @@ public class PlaybackChannel : BaseChannel
     public event EventHandler<PlaybackData>? Data;
     public event EventHandler? StopPlayback;
 
-    public PlaybackChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
+    public PlaybackChannel(string host, int port, string password, byte channelId, uint connectionId) : base(host, port, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;

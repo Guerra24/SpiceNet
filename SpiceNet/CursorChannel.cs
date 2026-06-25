@@ -1,5 +1,4 @@
 ﻿using SpiceNet.Protocol;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -13,7 +12,7 @@ public class CursorChannel : BaseChannel
     public event EventHandler? InvalidateAll;
     public event EventHandler? Hide;
 
-    public CursorChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
+    public CursorChannel(string host, int port, string password, byte channelId, uint connectionId) : base(host, port, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;

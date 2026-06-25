@@ -1,5 +1,4 @@
 ﻿using SpiceNet.Protocol;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -13,7 +12,7 @@ public class InputsChannel : BaseChannel
     public event EventHandler<InputKeyModifiers>? Init;
     public event EventHandler<InputKeyModifiers>? KeyModifiersChanged;
 
-    public InputsChannel(IPEndPoint endpoint, string password, byte channelId, uint connectionId) : base(endpoint, password)
+    public InputsChannel(string host, int port, string password, byte channelId, uint connectionId) : base(host, port, password)
     {
         base.channelId = channelId;
         base.connectionId = connectionId;

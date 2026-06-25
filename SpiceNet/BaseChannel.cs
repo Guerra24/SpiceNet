@@ -1,24 +1,26 @@
 ﻿using SpiceNet.Protocol;
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace SpiceNet;
 
-public abstract class BaseChannel : IAsyncDisposable, IDisposable
+public abstract class BaseChannel : IDisposable
 {
     private TcpClient? client;
-    private NetworkStream? stream;
+    private Stream? stream;
     private Thread thread = null!;
     private int ack_window = 0, msgs_until_ack = 0;
 
-    protected IPEndPoint endpoint;
-    protected string password;
+    protected readonly string host;
+    protected readonly int port;
+    protected readonly string password;
     protected byte type;
     protected byte channelId;
     protected uint connectionId;
@@ -26,14 +28,17 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
     protected List<BaseChannel> channels = new();
 
     public bool Ready { get; private set; }
+    public string? Proxy { get; set; }
+    public string? CA { get; set; }
 
     public event EventHandler? OnConnected;
     public event EventHandler? OnDisconnected;
     public event EventHandler<Exception>? OnError;
 
-    public BaseChannel(IPEndPoint endpoint, string password)
+    public BaseChannel(string host, int port, string password)
     {
-        this.endpoint = endpoint;
+        this.host = host;
+        this.port = port;
         this.password = password;
     }
 
@@ -62,19 +67,73 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
 
     public void Stop()
     {
+        foreach (var channel in channels)
+            channel.Stop();
+        try
+        {
+            client?.Client.Shutdown(SocketShutdown.Both);
+        }
+        catch { }
         // TODO: SPICE_MSGC_DISCONNECTING
     }
 
     private void Connect()
     {
-        client = new TcpClient(AddressFamily.InterNetwork)
+        client = new TcpClient()
         {
             NoDelay = true,
             ReceiveBufferSize = 1048576,
             SendBufferSize = 1048576
         };
-        client.Connect(endpoint);
-        stream = client.GetStream();
+
+        if (Uri.TryCreate(Proxy, new UriCreationOptions(), out var proxy))
+        {
+            client.Connect(proxy.Host, proxy.Port);
+            var proxyStream = client.GetStream();
+
+            var request = $"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n";
+
+            proxyStream.Write(Encoding.ASCII.GetBytes(request));
+
+            Span<byte> buffer = stackalloc byte[1024];
+            var length = proxyStream.Read(buffer);
+
+            var response = Encoding.ASCII.GetString(buffer).Trim();
+
+            if (!response.Contains("200 OK"))
+                throw new Exception(response);
+
+            var sslStream = new SslStream(proxyStream);
+
+            var options = new SslClientAuthenticationOptions()
+            {
+                RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) =>
+                {
+                    if (sslPolicyErrors == SslPolicyErrors.None)
+                        return true;
+
+                    if (certificate == null || chain == null) return false;
+
+                    chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                    chain.ChainPolicy.CustomTrustStore.Add(X509Certificate2.CreateFromPem(CA));
+
+                    chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+
+                    var element = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
+
+                    return chain.Build(element);
+                }
+            };
+
+            sslStream.AuthenticateAsClient(options);
+
+            stream = sslStream;
+        }
+        else
+        {
+            client.Connect(host, port);
+            stream = client.GetStream();
+        }
 
         unsafe
         {
@@ -385,15 +444,6 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
         NativeMemory.Free(ptr);
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        foreach (var channel in channels)
-            await channel.DisposeAsync();
-        if (stream != null)
-            await stream.DisposeAsync();
-        client?.Dispose();
-    }
-
     public void Dispose()
     {
         foreach (var channel in channels)
@@ -404,7 +454,7 @@ public abstract class BaseChannel : IAsyncDisposable, IDisposable
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public unsafe struct SpiceMsgNotify
+public struct SpiceMsgNotify
 {
     public ulong time_stamp;
     public SpiceNotifySeverity severity;
